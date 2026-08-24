@@ -35,10 +35,10 @@
     position: absolute;
     top: 12px;
     left: 12px;
-    width: 300px;
+    width: 340px;
     max-height: calc(100% - 24px);
     overflow-y: auto;
-    background: rgba(255, 255, 255, 0.88);
+    background: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 10px;
     padding: 14px 16px;
@@ -55,9 +55,25 @@
   #ui-panel .subtitle {
     font-size: 11px;
     color: #777;
-    margin: 0 0 12px 0;
+    margin: 0 0 10px 0;
     line-height: 1.4;
   }
+  #ui-panel h2.section-heading {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #8a7a63;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 16px 0 6px 0;
+    padding-top: 10px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  #ui-panel h2.section-heading:first-of-type {
+    border-top: none;
+    padding-top: 0;
+  }
+
+  /* ---- pose sliders (always visible, quick posing) ---- */
   .joint-row {
     margin-bottom: 10px;
   }
@@ -79,10 +95,102 @@
     width: 100%;
     accent-color: #8a7a63;
   }
+
+  /* ---- per-joint detail accordion ---- */
+  details.joint-accordion {
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: rgba(250, 248, 244, 0.6);
+    overflow: hidden;
+  }
+  details.joint-accordion > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 8px 10px;
+    display: block;
+  }
+  details.joint-accordion > summary::-webkit-details-marker {
+    display: none;
+  }
+  details.joint-accordion > summary::before {
+    content: "\25B8";
+    display: inline-block;
+    width: 12px;
+    color: #8a7a63;
+    font-size: 10px;
+    transition: transform 0.15s ease;
+  }
+  details.joint-accordion[open] > summary::before {
+    transform: rotate(90deg);
+  }
+  .accordion-summary-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    color: #333;
+    margin-bottom: 4px;
+    margin-left: 14px;
+  }
+  .accordion-summary-row .joint-name {
+    font-weight: 600;
+  }
+  .accordion-summary-row .joint-value {
+    color: #666;
+    font-variant-numeric: tabular-nums;
+  }
+  details.joint-accordion input[type="range"] {
+    width: calc(100% - 14px);
+    margin-left: 14px;
+    accent-color: #8a7a63;
+    display: block;
+  }
+  .joint-details {
+    padding: 4px 10px 10px 10px;
+    border-top: 1px dashed rgba(0, 0, 0, 0.1);
+    margin-top: 8px;
+  }
+  .detail-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 7px;
+    font-size: 11.5px;
+    color: #444;
+  }
+  .detail-field span.field-label {
+    flex: 0 0 auto;
+  }
+  .detail-field .range-pair {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .detail-field input[type="number"] {
+    width: 64px;
+    font-size: 11.5px;
+    padding: 3px 4px;
+    border: 1px solid #cfc6b4;
+    border-radius: 4px;
+    box-sizing: border-box;
+  }
+  .detail-field input[type="number"].narrow {
+    width: 52px;
+  }
+  .detail-field select {
+    font-size: 11.5px;
+    padding: 3px 4px;
+    border: 1px solid #cfc6b4;
+    border-radius: 4px;
+    background: #fff;
+    max-width: 150px;
+  }
+
   #reset-btn {
     width: 100%;
-    margin-top: 6px;
-    padding: 7px 0;
+    margin-top: 12px;
+    padding: 8px 0;
     font-size: 12.5px;
     border: 1px solid #b9ad98;
     background: #f4efe6;
@@ -110,9 +218,9 @@
 
 <div id="ui-panel">
   <h1>7-DOFロボット<br>ビューア</h1>
-  <p class="subtitle">各関節のスライダーで姿勢を操作できます。<br>マウスドラッグ: 視点回転 / ホイール: ズーム</p>
+  <p class="subtitle">各関節をクリックで展開すると、リンク長・可動範囲・モーター・回転軸を編集できます。<br>マウスドラッグ: 視点回転 / ホイール: ズーム</p>
   <div id="joint-sliders"></div>
-  <button id="reset-btn" type="button">ゼロ姿勢にリセット</button>
+  <button id="reset-btn" type="button">デフォルトに戻す</button>
 </div>
 
 <div id="hint">単一HTMLファイル・外部通信なし</div>
@@ -141,15 +249,20 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
 "use strict";
 
 /* =====================================================================
- * SECTION 1: ROBOT JOINT TREE DATA
+ * SECTION 1: ROBOT JOINT TREE DATA (frozen defaults)
  * ---------------------------------------------------------------------
  * This must be kept manually in sync with data/joints.json (Milestone 1).
  * It is a deliberately plain, line-for-line mirror of that JSON file's
  * "joints" array and "base_height_mm" field so a human can diff the two
  * side by side. If data/joints.json changes, update this block to match.
+ *
+ * ROBOT_CONFIG_DEFAULT itself is NEVER mutated at runtime -- the M4 detail
+ * panel (Section 7) edits a separate, deep-cloned working copy (JOINTS,
+ * see Section 3B) so "reset to defaults" always has an untouched original
+ * to restore from.
  * ===================================================================== */
 
-const ROBOT_CONFIG = {
+const ROBOT_CONFIG_DEFAULT = {
   // mirrors data/joints.json -> coordinate_frame
   coordinate_frame: "Z-up, X-right, Y-forward, right-handed, units millimeters/degrees. Origin is at ground level below the robot's base mount.",
   // mirrors data/joints.json -> base_height_mm
@@ -243,6 +356,26 @@ const ROBOT_CONFIG = {
 };
 
 /* =====================================================================
+ * SECTION 1B: MOTOR SPECS
+ * ---------------------------------------------------------------------
+ * Mirrors the motor identities in robot/motor_specs.py (name, and -- for
+ * the two models used anywhere in data/joints.json -- weight_g), plus
+ * physical outer-case dimensions (diameter_mm / length_mm) that
+ * robot/motor_specs.py does NOT currently carry (its MotorSpec dataclass
+ * only has rated_torque_nm/stall_torque_nm/rated_speed_rpm/weight_g/
+ * source_url -- torque/speed numbers aren't needed for this viewer, which
+ * only renders each motor as a real-scale cylinder). The dimensions below
+ * were supplied directly as part of the M4 viewer rework; if
+ * robot/motor_specs.py ever grows physical-dimension fields, keep this
+ * object in sync with that as the new source of truth.
+ * ===================================================================== */
+
+const MOTOR_SPECS = {
+  "GIM4310-10": { name: "GIM4310-10", diameter_mm: 53, length_mm: 32, weight_g: 217 },
+  "GIM4310-36": { name: "GIM4310-36", diameter_mm: 55, length_mm: 47, weight_g: 310 },
+};
+
+/* =====================================================================
  * SECTION 2: PURE-MATH FORWARD KINEMATICS (standalone, dependency-free)
  * ---------------------------------------------------------------------
  * Mirrors robot/kinematics.py exactly:
@@ -255,11 +388,12 @@ const ROBOT_CONFIG = {
  *
  * This block intentionally uses only plain JS arrays/numbers -- no THREE.*
  * types -- so it can later be copy-pasted into its own .js file and unit
- * tested under Node (e.g. with a small script that feeds in the same
- * sample poses used in tests/test_kinematics.py and tests/test_dynamics.py
- * and diffs against robot.kinematics.forward_kinematics output). It has
- * in fact already been verified that way during Milestone 3 development;
- * see the M3 report for the numeric comparison.
+ * tested under Node. It reads axis / origin_offset_mm / end_effector_offset_mm
+ * / range_deg off of whatever joint objects are passed in via `jointsList`
+ * on every call (nothing here is cached or assumed constant), so the M4
+ * detail panel (Section 7) can freely mutate those fields on JOINTS at
+ * runtime -- edit a link length, range, or axis, and the very next
+ * forwardKinematics() call already reflects it.
  *
  * 4x4 matrices are represented as flat length-16 arrays in ROW-MAJOR
  * order: element (row r, col c) lives at index r*4 + c. This mirrors
@@ -353,9 +487,24 @@ function rotationColumn(m, col) {
   return [m[0 * 4 + col], m[1 * 4 + col], m[2 * 4 + col]];
 }
 
+// Applies ONLY the 3x3 rotation part of a mat4 to a vector (translation
+// ignored) -- i.e. R @ v. Used to project a joint's LOCAL rotation axis
+// into world space via its PARENT's accumulated world rotation, matching
+// the "_joint_axis_world" convention documented in tests/test_dynamics.py
+// (parent_rotation @ local_axis, NOT the joint's own world transform,
+// which would incorrectly bake in that joint's own current angle).
+function rotateOnly(m, v) {
+  return [
+    m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+    m[4] * v[0] + m[5] * v[1] + m[6] * v[2],
+    m[8] * v[0] + m[9] * v[1] + m[10] * v[2],
+  ];
+}
+
 // Mirrors kinematics.py::_clamp_angle (silently clamps; the Python version
 // also emits a warnings.warn(), which has no meaningful UI equivalent here
-// since sliders are already constrained to range_deg by their min/max).
+// since the pose sliders are already constrained to range_deg by their
+// own min/max, kept in sync with range_deg by the M4 detail panel).
 function clampAngle(angleDeg, rangeDeg) {
   const [lo, hi] = rangeDeg;
   if (angleDeg < lo) return lo;
@@ -410,13 +559,13 @@ function forwardKinematics(jointsList, baseHeightMm, jointAnglesDeg) {
 }
 
 /* =====================================================================
- * SECTION 3: THREE.JS SCENE / RENDERING
+ * SECTION 3: THREE.JS SCENE / RENDERING SETUP
  * ---------------------------------------------------------------------
  * Everything below this point uses THREE.* and DOM APIs. The robot's
- * native frame is Z-up / X-right / Y-forward (see ROBOT_CONFIG above);
- * three.js scenes are conventionally Y-up. Rather than fight that, all
- * positions/directions coming out of forwardKinematics() are passed
- * through robotToThree(), a fixed proper rotation (det = +1, so no
+ * native frame is Z-up / X-right / Y-forward (see ROBOT_CONFIG_DEFAULT
+ * above); three.js scenes are conventionally Y-up. Rather than fight
+ * that, all positions/directions coming out of forwardKinematics() are
+ * passed through robotToThree(), a fixed proper rotation (det = +1, so no
  * mirroring) that maps:
  *     three.x =  robot.x
  *     three.y =  robot.z   (robot up      -> three up)
@@ -427,39 +576,105 @@ function robotToThree(v) {
   return new THREE.Vector3(v[0], v[2], -v[1]);
 }
 
-// ---- constants (mm) ----
-const JOINTS = ROBOT_CONFIG.joints;
-const BASE_HEIGHT_MM = ROBOT_CONFIG.base_height_mm;
-const JOINTS_BY_NAME = {};
-for (const j of JOINTS) JOINTS_BY_NAME[j.name] = j;
-
 function vecLen(v) {
   return Math.hypot(v[0], v[1], v[2]);
 }
 
-const LINK_LENGTHS_MM = {
-  // torso: waist_yaw -> neck_yaw. Both neck_yaw and the two shoulders share
-  // the same +300mm Z offset from waist_yaw (see data/joints.json), and a
-  // Z-axis rotation (waist_yaw's own axis) never changes a vector's Z
-  // component, so this distance is constant regardless of waist_yaw's
-  // angle -- exactly like every other link length below, all of which are
-  // computed from a joint's origin_offset_mm/end_effector_offset_mm rather
-  // than hardcoded, so they can't silently desync from data/joints.json.
-  torso: vecLen(JOINTS_BY_NAME.neck_yaw.origin_offset_mm),
-  // clavicle: shoulder_pitch_l -> shoulder_pitch_r, a straight line that
-  // bridges the torso's tapered top to both shoulder ball joints. Also
-  // constant for the same reason (both shoulder offsets share the same Z
-  // and Y; only their (rotating) X differs, by a fixed magnitude).
-  clavicle: Math.abs(
-    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[0] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[0]
-  ),
-  neck_upper: vecLen(JOINTS_BY_NAME.neck_pitch.origin_offset_mm), // neck_yaw -> neck_pitch
-  neck_head: vecLen(JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm), // neck_pitch -> head
-  upper_arm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.origin_offset_mm), // shoulder -> elbow
-  forearm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.end_effector_offset_mm), // elbow -> hand
-  upper_arm_r: vecLen(JOINTS_BY_NAME.elbow_pitch_r.origin_offset_mm),
-  forearm_r: vecLen(JOINTS_BY_NAME.elbow_pitch_r.end_effector_offset_mm),
-};
+/* =====================================================================
+ * SECTION 3B: MUTABLE WORKING CONFIG
+ * ---------------------------------------------------------------------
+ * JOINTS is a deep clone of ROBOT_CONFIG_DEFAULT.joints, edited IN PLACE
+ * by the M4 detail panel (Section 7): link length, range_deg, motor, and
+ * axis are all mutated directly on these joint objects. JOINTS_BY_NAME
+ * holds stable references to the SAME objects for the lifetime of the
+ * page (never rebuilt/reassigned), so every closure that captured a
+ * reference -- UI event handlers, render() -- keeps seeing live edits
+ * with no stale-reference bugs.
+ *
+ * "Reset to defaults" copies field values back from ROBOT_CONFIG_DEFAULT
+ * (which is itself never touched) into these same JOINTS objects.
+ * ===================================================================== */
+
+function deepCloneJoints(joints) {
+  return JSON.parse(JSON.stringify(joints));
+}
+
+const JOINTS = deepCloneJoints(ROBOT_CONFIG_DEFAULT.joints);
+const BASE_HEIGHT_MM = ROBOT_CONFIG_DEFAULT.base_height_mm; // not user-editable in this round
+const JOINTS_BY_NAME = {};
+for (const j of JOINTS) JOINTS_BY_NAME[j.name] = j;
+const DEFAULT_JOINTS_BY_NAME = {};
+for (const j of ROBOT_CONFIG_DEFAULT.joints) DEFAULT_JOINTS_BY_NAME[j.name] = j;
+
+// Fixed unit directions of each joint's origin_offset_mm / end_effector_
+// offset_mm, captured ONCE from the frozen defaults and never recomputed.
+// Editing "link length" in the panel scales a vector's MAGNITUDE along
+// this fixed direction; the direction itself never changes (per the M4
+// brief: "keep its direction fixed, only change the length").
+function unitDir(v) {
+  const len = vecLen(v);
+  if (len < 1e-9) return null; // degenerate (waist_yaw's [0,0,0] offset): no defined direction
+  return [v[0] / len, v[1] / len, v[2] / len];
+}
+const ORIGIN_OFFSET_DIRECTIONS = {};
+const END_EFFECTOR_OFFSET_DIRECTIONS = {};
+for (const j of ROBOT_CONFIG_DEFAULT.joints) {
+  ORIGIN_OFFSET_DIRECTIONS[j.name] = unitDir(j.origin_offset_mm);
+  if (j.end_effector_offset_mm) {
+    END_EFFECTOR_OFFSET_DIRECTIONS[j.name] = unitDir(j.end_effector_offset_mm);
+  }
+}
+
+function setLinkLength(jointName, newLengthMm) {
+  const dir = ORIGIN_OFFSET_DIRECTIONS[jointName];
+  if (!dir) return; // waist_yaw: zero offset, no-op (no direction to scale along)
+  const joint = JOINTS_BY_NAME[jointName];
+  joint.origin_offset_mm = [dir[0] * newLengthMm, dir[1] * newLengthMm, dir[2] * newLengthMm];
+}
+function setEndEffectorLength(jointName, newLengthMm) {
+  const dir = END_EFFECTOR_OFFSET_DIRECTIONS[jointName];
+  if (!dir) return;
+  const joint = JOINTS_BY_NAME[jointName];
+  joint.end_effector_offset_mm = [dir[0] * newLengthMm, dir[1] * newLengthMm, dir[2] * newLengthMm];
+}
+
+function axisToLabel(axis) {
+  if (axis[0] === 1 && axis[1] === 0 && axis[2] === 0) return "X";
+  if (axis[0] === 0 && axis[1] === 1 && axis[2] === 0) return "Y";
+  return "Z";
+}
+function labelToAxis(label) {
+  if (label === "X") return [1, 0, 0];
+  if (label === "Y") return [0, 1, 0];
+  return [0, 0, 1];
+}
+
+// Recomputed on every render() call (never cached as a top-level const)
+// since origin_offset_mm/end_effector_offset_mm are now runtime-mutable.
+// All lengths are derived from the CURRENT joint offsets, never hardcoded,
+// so they can't silently desync from either data/joints.json or the
+// panel's live edits.
+function computeLinkLengths() {
+  const shoulderDelta = [
+    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[0] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[0],
+    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[1] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[1],
+    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[2] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[2],
+  ];
+  return {
+    // torso: waist_yaw -> neck_yaw (static visual connector, not a joint).
+    torso: vecLen(JOINTS_BY_NAME.neck_yaw.origin_offset_mm),
+    // clavicle: shoulder_pitch_l -> shoulder_pitch_r, full 3D distance (not
+    // just an X delta) so it stays correct even if the panel is used to
+    // edit the two shoulders' link lengths asymmetrically.
+    clavicle: vecLen(shoulderDelta),
+    neck_upper: vecLen(JOINTS_BY_NAME.neck_pitch.origin_offset_mm), // neck_yaw -> neck_pitch
+    neck_head: vecLen(JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm), // neck_pitch -> head
+    upper_arm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.origin_offset_mm), // shoulder -> elbow
+    forearm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.end_effector_offset_mm), // elbow -> hand
+    upper_arm_r: vecLen(JOINTS_BY_NAME.elbow_pitch_r.origin_offset_mm),
+    forearm_r: vecLen(JOINTS_BY_NAME.elbow_pitch_r.end_effector_offset_mm),
+  };
+}
 
 // ---- renderer / scene / camera ----
 const container = document.getElementById("canvas-container");
@@ -480,9 +695,9 @@ const camera = new THREE.PerspectiveCamera(40, 1, 10, 10000);
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
 scene.add(ambientLight);
 
-// Key light sits roughly alongside the default camera (see camTheta below,
-// which starts on the three.js -Z side so the painted face is visible), so
-// the camera-facing side of the mannequin is well lit instead of backlit.
+// Key light sits roughly alongside the default camera (see camTheta below),
+// so the camera-facing side of the mannequin is well lit instead of
+// backlit.
 const keyLight = new THREE.DirectionalLight(0xfff3e0, 1.15);
 keyLight.position.set(700, 1500, -950);
 keyLight.castShadow = true;
@@ -517,33 +732,34 @@ ring.position.y = 0.5;
 scene.add(ring);
 
 /* =====================================================================
- * SECTION 4: MANNEQUIN GEOMETRY
+ * SECTION 4: MANNEQUIN GEOMETRY (chibi toy-robot styling)
  * ---------------------------------------------------------------------
- * Neutral matte "artist's posable mannequin" look: smooth capsules for
- * limbs, small spheres for ball joints, a static (non-kinematic) torso
- * connector, a pedestal stand, and a rounded head with a simple painted
- * chibi face (CanvasTexture on a small forward-facing plane).
+ * Big-head "chibi" proportions: an oversized plain head (no face -- the
+ * user explicitly asked for no facial features), chunky rounded
+ * capsule limbs, a wide torso, and a real motor cylinder at every joint
+ * sized from MOTOR_SPECS. Matte neutral "toy robot" materials, not
+ * skin-toned.
+ *
+ * Geometry objects below are created with placeholder dimensions and
+ * immediately replaced by the first render() call at the bottom of this
+ * script (see Section 5): link lengths and motor models are runtime-
+ * mutable via the detail panel, so nothing here can be "built once and
+ * left alone" the way the M3 version's fixed-length capsules were.
  * ===================================================================== */
 
-const MANNEQUIN_COLOR = 0xcdc3ac; // warm putty / matte wood tone
-const JOINT_COLOR = 0x8f8570; // slightly darker "ball joint" tone
-const PEDESTAL_COLOR = 0x3f3b34;
+const MANNEQUIN_COLOR = 0xd6d2c8; // light neutral putty-grey, matte resin/plastic
+const HEAD_COLOR = 0xdedad0; // a touch lighter than the body, for a clean toy-head pop
+const MOTOR_COLOR = 0x4d565f; // dark matte gunmetal, reads as a mechanical actuator
+const PEDESTAL_COLOR = 0x353330;
 
-const mannequinMat = new THREE.MeshStandardMaterial({ color: MANNEQUIN_COLOR, roughness: 0.75, metalness: 0.05 });
-const jointMat = new THREE.MeshStandardMaterial({ color: JOINT_COLOR, roughness: 0.6, metalness: 0.1 });
+const mannequinMat = new THREE.MeshStandardMaterial({ color: MANNEQUIN_COLOR, roughness: 0.7, metalness: 0.08 });
+const headMat = new THREE.MeshStandardMaterial({ color: HEAD_COLOR, roughness: 0.65, metalness: 0.06 });
+const motorMat = new THREE.MeshStandardMaterial({ color: MOTOR_COLOR, roughness: 0.4, metalness: 0.5 });
 const pedestalMat = new THREE.MeshStandardMaterial({ color: PEDESTAL_COLOR, roughness: 0.8, metalness: 0.15 });
 
 // ---- pedestal (static; robot sits on a stand of height base_height_mm) ----
-// Narrow at the top and flared at the base for a stable "stand" look, kept
-// clear of the arms: in zero pose the hands sit at z=320mm/radius=150mm
-// from the central axis, and the arm capsules themselves get as close as
-// ~116-123mm from that axis (150mm minus each capsule's own tube radius),
-// all within the pedestal's 0-500mm height range. This radius/taper keeps
-// >20mm clearance from that closest arm approach across the whole pedestal
-// height (an earlier, wider pedestal left only a few mm and visibly
-// clipped the forearms).
-const pedestalRadiusTop = 80;
-const pedestalRadiusBottom = 120;
+const pedestalRadiusTop = 90;
+const pedestalRadiusBottom = 135;
 const pedestalGeo = new THREE.CylinderGeometry(pedestalRadiusTop, pedestalRadiusBottom, BASE_HEIGHT_MM, 32);
 const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
 pedestal.position.set(0, BASE_HEIGHT_MM / 2, 0); // robot (0,0,base/2) -> three (0, base/2, 0)
@@ -560,14 +776,41 @@ pedestalCap.position.set(0, BASE_HEIGHT_MM, 0);
 pedestalCap.castShadow = true;
 scene.add(pedestalCap);
 
-// ---- helper: build a capsule oriented from world point A to world point B ----
-function makeCapsule(lengthMm, radiusMm, material) {
-  const cylLength = Math.max(lengthMm - 2 * radiusMm, 1);
-  const geo = new THREE.CapsuleGeometry(radiusMm, cylLength, 6, 12);
-  const mesh = new THREE.Mesh(geo, material);
+// ---- helpers ----
+function makePlaceholderCapsule(radiusMm, material) {
+  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radiusMm, 10, 6, 12), material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
+}
+
+function rebuildCapsule(mesh, lengthMm, radiusMm) {
+  const cylLength = Math.max(lengthMm - 2 * radiusMm, 1);
+  const newGeo = new THREE.CapsuleGeometry(radiusMm, cylLength, 6, 12);
+  mesh.geometry.dispose();
+  mesh.geometry = newGeo;
+}
+
+function rebuildMotorCylinder(mesh, spec) {
+  const radius = spec.diameter_mm / 2;
+  const newGeo = new THREE.CylinderGeometry(radius, radius, spec.length_mm, 24);
+  mesh.geometry.dispose();
+  mesh.geometry = newGeo;
+}
+
+// Orients a mesh (built Y-axis-aligned, like THREE's default Capsule/
+// CylinderGeometry) so its own local Y axis points along a given world
+// direction, centered at a given world position. setFromUnitVectors always
+// returns a valid PROPER rotation for a single-axis alignment (unlike
+// building a full 3-vector basis from independently-sourced vectors, which
+// can accidentally come out improper -- see the Section 5 comment in the
+// M3-round code that first ran into that with the (now-removed) face
+// plane); a cylinder/capsule is rotationally symmetric about its own axis
+// anyway, so the unconstrained "twist" setFromUnitVectors leaves in place
+// is never visible here.
+function orientAlongDirection(mesh, centerPos3, dirThree) {
+  mesh.position.copy(centerPos3);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirThree);
 }
 
 function orientBetween(mesh, pA3, pB3) {
@@ -583,162 +826,94 @@ function orientBetween(mesh, pA3, pB3) {
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
 }
 
-function orientSphereJoint(mesh, p3) {
-  mesh.position.copy(p3);
-}
-
 // ---- torso (static visual connector, NOT a kinematic joint) ----
-// Spans from the waist_yaw pivot up to the neck_yaw attachment height,
-// which is also the shoulder attachment height (both offset +300mm in Z
-// from waist_yaw per data/joints.json), so it reads as a body connecting
-// the pedestal to the shoulder/neck line. Length comes from
-// LINK_LENGTHS_MM.torso (derived from data/joints.json), not a hardcoded
-// constant, so it can't silently desync if that offset ever changes.
-const torsoRadius = 100;
-const torso = makeCapsule(LINK_LENGTHS_MM.torso, torsoRadius, mannequinMat);
+const torsoRadius = 128;
+const torso = makePlaceholderCapsule(torsoRadius, mannequinMat);
 scene.add(torso);
 
 // ---- clavicle (static visual connector, NOT a kinematic joint) ----
-// A capsule spanning shoulder_pitch_l -> shoulder_pitch_r, passing right
-// through the torso's tapered top (both endpoints and the torso's own top
-// share the same world Z height -- see LINK_LENGTHS_MM.torso comment).
-// A capsule's hemispherical caps mean the torso alone tapers to near-zero
-// radius right where the shoulder balls are, leaving a visible air gap;
-// this bar bridges torso -> clavicle -> shoulder ball -> upper arm into
-// one continuous silhouette instead of floating disconnected limbs.
-const clavicleRadius = 44;
-const clavicle = makeCapsule(LINK_LENGTHS_MM.clavicle, clavicleRadius, mannequinMat);
+const clavicleRadius = 56;
+const clavicle = makePlaceholderCapsule(clavicleRadius, mannequinMat);
 scene.add(clavicle);
 
-// ---- limbs ----
-const limbRadiusUpperArm = 34;
-const limbRadiusForearm = 27;
-const limbRadiusNeck = 26;
+// ---- limbs: chunky, toy-proportioned (thick radius relative to length) ----
+const limbRadiusUpperArm = 50;
+const limbRadiusForearm = 42;
+const limbRadiusNeck = 40;
 
-const upperArmL = makeCapsule(LINK_LENGTHS_MM.upper_arm_l, limbRadiusUpperArm, mannequinMat);
-const forearmL = makeCapsule(LINK_LENGTHS_MM.forearm_l, limbRadiusForearm, mannequinMat);
-const upperArmR = makeCapsule(LINK_LENGTHS_MM.upper_arm_r, limbRadiusUpperArm, mannequinMat);
-const forearmR = makeCapsule(LINK_LENGTHS_MM.forearm_r, limbRadiusForearm, mannequinMat);
-const neckLower = makeCapsule(LINK_LENGTHS_MM.neck_upper, limbRadiusNeck, mannequinMat);
-const neckUpper = makeCapsule(LINK_LENGTHS_MM.neck_head, limbRadiusNeck * 0.9, mannequinMat);
+const upperArmL = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat);
+const forearmL = makePlaceholderCapsule(limbRadiusForearm, mannequinMat);
+const upperArmR = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat);
+const forearmR = makePlaceholderCapsule(limbRadiusForearm, mannequinMat);
+const neckLower = makePlaceholderCapsule(limbRadiusNeck, mannequinMat);
+const neckUpper = makePlaceholderCapsule(limbRadiusNeck * 0.9, mannequinMat);
 scene.add(upperArmL, forearmL, upperArmR, forearmR, neckLower, neckUpper);
 
-// ---- joint ball markers ----
-const jointSphereRadius = {
-  waist_yaw: 62,
-  neck_yaw: 30,
-  neck_pitch: 28,
-  shoulder_pitch_l: 40,
-  elbow_pitch_l: 32,
-  shoulder_pitch_r: 40,
-  elbow_pitch_r: 32,
-};
-const jointSpheres = {};
-for (const name of Object.keys(jointSphereRadius)) {
-  const s = new THREE.Mesh(new THREE.SphereGeometry(jointSphereRadius[name], 20, 16), jointMat);
-  s.castShadow = true;
-  s.receiveShadow = true;
-  scene.add(s);
-  jointSpheres[name] = s;
+// ---- motor cylinders: one real-scale actuator per joint (Section C) ----
+// These ARE the joint markers -- no separate ball-joint sphere on top, for
+// a cleaner "this is a real actuator" look now that a real cylinder sized
+// from MOTOR_SPECS sits at every joint.
+const motorMeshes = {};
+for (const j of JOINTS) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 10, 24), motorMat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  motorMeshes[j.name] = mesh;
 }
 
-// ---- hands (small rounded blobs at the wrist end effectors) ----
-const handRadius = 30;
-const handMat = mannequinMat;
-const handL = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), handMat);
-const handR = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), handMat);
+// ---- hands (chunky rounded mitten blobs at the wrist end effectors) ----
+const handRadius = 46;
+const handL = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat);
+const handR = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat);
 handL.castShadow = true;
 handR.castShadow = true;
 scene.add(handL, handR);
 
-// ---- head + chibi face ----
-const headRadius = 92;
-const headMat = new THREE.MeshStandardMaterial({ color: MANNEQUIN_COLOR, roughness: 0.7, metalness: 0.05 });
+// ---- head: oversized chibi proportion, plain solid color, no face ----
+// Positioned at the exact "head" end-effector FK world point every render()
+// -- this is purely a rendering stylization (a bigger decorative sphere at
+// the same kinematic point), not a change to any kinematics or link-length
+// semantics. Do not confuse this with the neck's actual link lengths
+// (neck_upper/neck_head in computeLinkLengths()), which stay real,
+// meaningful, user-editable dimensions in the detail panel.
+const headRadius = 165;
 const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 32, 24), headMat);
 head.castShadow = true;
 head.receiveShadow = true;
 scene.add(head);
 
-function buildFaceTexture() {
-  const size = 512;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-
-  // Transparent canvas; draw a filled disc in the mannequin's own color so
-  // the plane blends seamlessly into the head sphere it's mounted on, then
-  // paint simple chibi features on top.
-  ctx.clearRect(0, 0, size, size);
-  ctx.beginPath();
-  ctx.arc(size / 2, size / 2, size * 0.47, 0, Math.PI * 2);
-  ctx.fillStyle = "#cdc3ac";
-  ctx.fill();
-
-  // blush (cute, deformed/chibi touch)
-  ctx.fillStyle = "rgba(224, 140, 130, 0.35)";
-  ctx.beginPath();
-  ctx.ellipse(size * 0.30, size * 0.60, size * 0.075, size * 0.05, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(size * 0.70, size * 0.60, size * 0.075, size * 0.05, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // eyes: simple large dark ovals (deformed/chibi, not realistic)
-  ctx.fillStyle = "#2b2620";
-  ctx.beginPath();
-  ctx.ellipse(size * 0.34, size * 0.46, size * 0.055, size * 0.075, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(size * 0.66, size * 0.46, size * 0.055, size * 0.075, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // little eye-shine highlights
-  ctx.fillStyle = "#f4f0e6";
-  ctx.beginPath();
-  ctx.arc(size * 0.325, size * 0.435, size * 0.014, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(size * 0.645, size * 0.435, size * 0.014, 0, Math.PI * 2);
-  ctx.fill();
-
-  // mouth: simple curved smile
-  ctx.strokeStyle = "#2b2620";
-  ctx.lineWidth = size * 0.02;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(size * 0.42, size * 0.66);
-  ctx.quadraticCurveTo(size * 0.5, size * 0.72, size * 0.58, size * 0.66);
-  ctx.stroke();
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-const faceTexture = buildFaceTexture();
-// MeshStandardMaterial (not MeshBasicMaterial) so the face patch picks up
-// the same directional/ambient lighting as the head sphere it sits on --
-// an unlit material here would look like a flat, mismatched decal glued
-// on top instead of part of the head. Base color stays white so the
-// texture's own painted colors (which already match MANNEQUIN_COLOR for
-// the background disc) aren't double-tinted.
-const faceMat = new THREE.MeshStandardMaterial({
-  map: faceTexture,
-  transparent: true,
-  depthWrite: false,
-  roughness: 0.7,
-  metalness: 0.05,
-});
-const facePlaneSize = headRadius * 1.5;
-const facePlane = new THREE.Mesh(new THREE.PlaneGeometry(facePlaneSize, facePlaneSize), faceMat);
-scene.add(facePlane);
-
 /* =====================================================================
- * SECTION 5: POSE UPDATE (FK -> mesh transforms)
+ * SECTION 5: RENDER (mutable config -> FK -> geometry + mesh transforms)
+ * ---------------------------------------------------------------------
+ * Single entry point called after EVERY edit -- pose slider, link length,
+ * range, motor, or axis -- so there is exactly one code path and no risk
+ * of a partial update leaving geometry and position out of sync. Rebuilds
+ * are cheap (a handful of low-poly primitives), so doing a full
+ * geometry rebuild + FK + reposition on every slider 'input' event (which
+ * can fire dozens of times per second while dragging) is not a real
+ * performance concern here.
  * ===================================================================== */
 
-function updatePose(jointAnglesDeg) {
-  const T = forwardKinematics(JOINTS, BASE_HEIGHT_MM, jointAnglesDeg);
+function render() {
+  const LINK_LENGTHS_MM = computeLinkLengths();
+
+  rebuildCapsule(torso, LINK_LENGTHS_MM.torso, torsoRadius);
+  rebuildCapsule(clavicle, LINK_LENGTHS_MM.clavicle, clavicleRadius);
+  rebuildCapsule(upperArmL, LINK_LENGTHS_MM.upper_arm_l, limbRadiusUpperArm);
+  rebuildCapsule(forearmL, LINK_LENGTHS_MM.forearm_l, limbRadiusForearm);
+  rebuildCapsule(upperArmR, LINK_LENGTHS_MM.upper_arm_r, limbRadiusUpperArm);
+  rebuildCapsule(forearmR, LINK_LENGTHS_MM.forearm_r, limbRadiusForearm);
+  rebuildCapsule(neckLower, LINK_LENGTHS_MM.neck_upper, limbRadiusNeck);
+  rebuildCapsule(neckUpper, LINK_LENGTHS_MM.neck_head, limbRadiusNeck * 0.9);
+
+  for (const j of JOINTS) {
+    rebuildMotorCylinder(motorMeshes[j.name], MOTOR_SPECS[j.motor]);
+  }
+
+  const T = forwardKinematics(JOINTS, BASE_HEIGHT_MM, currentAngles);
+  const baseTransform = mat4Identity();
+  baseTransform[11] = BASE_HEIGHT_MM;
 
   const pWaist = robotToThree(worldPosition(T.waist_yaw));
   const pNeckYaw = robotToThree(worldPosition(T.neck_yaw));
@@ -764,66 +939,27 @@ function updatePose(jointAnglesDeg) {
   orientBetween(neckLower, pNeckYaw, pNeckPitch);
   orientBetween(neckUpper, pNeckPitch, pHead);
 
-  // joints
-  orientSphereJoint(jointSpheres.waist_yaw, pWaist);
-  orientSphereJoint(jointSpheres.neck_yaw, pNeckYaw);
-  orientSphereJoint(jointSpheres.neck_pitch, pNeckPitch);
-  orientSphereJoint(jointSpheres.shoulder_pitch_l, pShoulderL);
-  orientSphereJoint(jointSpheres.elbow_pitch_l, pElbowL);
-  orientSphereJoint(jointSpheres.shoulder_pitch_r, pShoulderR);
-  orientSphereJoint(jointSpheres.elbow_pitch_r, pElbowR);
+  // motor cylinders: centered at each joint's own world position, aligned
+  // to that joint's rotation axis IN WORLD SPACE -- the PARENT's
+  // accumulated world rotation applied to the joint's own local axis
+  // vector (rotateOnly), NOT the joint's own world transform (which would
+  // incorrectly bake in this joint's own current rotation angle on top of
+  // the axis it's rotating about).
+  for (const j of JOINTS) {
+    const parentWorld = j.parent === null ? baseTransform : T[j.parent];
+    const axisRobot = rotateOnly(parentWorld, j.axis);
+    const axisThree = robotToThree(axisRobot).normalize();
+    const jointPosThree = robotToThree(worldPosition(T[j.name]));
+    orientAlongDirection(motorMeshes[j.name], jointPosThree, axisThree);
+  }
 
   // hands
   handL.position.copy(pHandL);
   handR.position.copy(pHandR);
 
-  // head
+  // head: same exact FK "head" end-effector point as before -- just a much
+  // bigger decorative sphere rendered there (see Section 4 comment).
   head.position.copy(pHead);
-
-  // Face plane: mounted on the head. T.head's rotation part is identical to
-  // neck_pitch's world rotation (the end-effector transform only translates
-  // -- see forwardKinematics), so its local X/Y/Z columns give the head's
-  // actual world-space right/forward/up directions.
-  //
-  // Orientation uses the FULL basis (right, up, forward), not
-  // setFromUnitVectors(defaultNormal, forwardThree): setFromUnitVectors only
-  // pins the plane's normal to the forward direction and leaves the twist
-  // (rotation about that forward axis) unconstrained/arbitrary. At exactly
-  // neck_pitch=0 that arbitrary twist happens to come out right-side-up by
-  // luck, but at any nonzero neck_pitch it does not -- e.g. the mouth ends
-  // up above the eyes. Building an explicit basis from the FK rotation's own
-  // up column fixes the twist to the head's actual tilt, at every angle.
-  const rightRobot = rotationColumn(T.head, 0); // local X column (right)
-  const forwardRobot = rotationColumn(T.head, 1); // local Y column (forward)
-  const upRobot = rotationColumn(T.head, 2); // local Z column (up)
-  // NOTE the .negate(): for any proper rotation matrix's own columns
-  // c0/c1/c2, the identity c0 x c2 = -c1 always holds (both robot-space and,
-  // since robotToThree() is itself a proper rotation, three-space too --
-  // proper rotations preserve cross products). So plain
-  // rightThree x upThree = -forwardThree, which makes
-  // makeBasis(rightThree, upThree, forwardThree) below an IMPROPER matrix
-  // (a reflection, det = -1): setFromRotationMatrix() cannot extract a
-  // valid rotation quaternion from that and silently produces garbage,
-  // which is why the face disappeared/warped when this was first tried
-  // without the negation. Negating right restores
-  // rightThree x upThree = +forwardThree (a proper rotation), at the cost
-  // of mirroring left/right -- invisible here since the painted face
-  // (eyes/blush/mouth) is left-right symmetric.
-  const rightThree = robotToThree(rightRobot).normalize().negate();
-  const forwardThree = robotToThree(forwardRobot).normalize();
-  const upThree = robotToThree(upRobot).normalize();
-  //
-  // Clearance from the head sphere: the plane must sit entirely OUTSIDE the
-  // sphere (offset > headRadius at the plane's own center, its closest
-  // point to the head), or the sphere's surface intersects/depth-fights the
-  // flat plane right where the eyes/mouth are painted (a visible "snout"
-  // artifact). A flat fixed offset comfortably clears the whole plane,
-  // including its center, at every point.
-  const faceOffsetMm = headRadius + 6;
-  const facePos = pHead.clone().add(forwardThree.clone().multiplyScalar(faceOffsetMm));
-  facePlane.position.copy(facePos);
-  const faceBasis = new THREE.Matrix4().makeBasis(rightThree, upThree, forwardThree);
-  facePlane.quaternion.setFromRotationMatrix(faceBasis);
 }
 
 /* =====================================================================
@@ -833,14 +969,10 @@ function updatePose(jointAnglesDeg) {
  * target point, implemented directly against THREE.PerspectiveCamera.
  * ===================================================================== */
 
-const cameraTarget = new THREE.Vector3(0, 620, 0); // roughly torso/chest height
-// Robot's local "forward" (+Y, per data/joints.json's coordinate_frame) maps
-// to three.js -Z under robotToThree(), so the face (painted on the +Y side
-// of the head) is only visible from cameras on the -Z side. Start there
-// (with a bit of azimuth for a 3/4 view) so the face is visible by default.
+const cameraTarget = new THREE.Vector3(0, 700, 0); // roughly chest/head height on the chibi proportions
 let camTheta = Math.PI * 0.8; // azimuth
 let camPhi = 1.15; // polar angle from +Y (radians), clamped away from poles
-let camRadius = 2100;
+let camRadius = 2200;
 const CAM_MIN_RADIUS = 500;
 const CAM_MAX_RADIUS = 4500;
 
@@ -891,7 +1023,16 @@ renderer.domElement.addEventListener("wheel", (e) => {
 }, { passive: false });
 
 /* =====================================================================
- * SECTION 7: UI SLIDERS
+ * SECTION 7: UI -- per-joint accordion (pose slider + detail controls)
+ * ---------------------------------------------------------------------
+ * Each of the 7 joints gets a collapsible <details> block: the always-
+ * visible <summary> holds the joint name and its pose slider (so posing
+ * stays quick without expanding anything); expanding reveals 4 detail
+ * controls -- link length, (for leaf joints) end-effector link length,
+ * rotation range, motor model, and rotation axis -- all of which call
+ * render() immediately on change, same live-update pattern as the pose
+ * sliders. A native <details> element needs no extra JS state to manage
+ * open/closed per joint, keeping this simple.
  * ===================================================================== */
 
 const currentAngles = {};
@@ -900,50 +1041,225 @@ for (const j of JOINTS) currentAngles[j.name] = 0.0;
 const slidersContainer = document.getElementById("joint-sliders");
 const sliderInputs = {};
 const valueLabels = {};
+const lengthInputs = {};
+const eeLengthInputs = {};
+const rangeMinInputs = {};
+const rangeMaxInputs = {};
+const motorSelects = {};
+const axisSelects = {};
 
-for (const j of JOINTS) {
-  const row = document.createElement("div");
-  row.className = "joint-row";
+function buildJointAccordion(j) {
+  const details = document.createElement("details");
+  details.className = "joint-accordion";
+  details.dataset.joint = j.name;
 
-  const label = document.createElement("label");
+  const summary = document.createElement("summary");
+  const summaryRow = document.createElement("div");
+  summaryRow.className = "accordion-summary-row";
   const nameSpan = document.createElement("span");
   nameSpan.className = "joint-name";
   nameSpan.textContent = j.part_ja + " (" + j.name + ")";
   const valueSpan = document.createElement("span");
   valueSpan.className = "joint-value";
   valueSpan.textContent = "0°";
-  label.appendChild(nameSpan);
-  label.appendChild(valueSpan);
+  summaryRow.appendChild(nameSpan);
+  summaryRow.appendChild(valueSpan);
+  summary.appendChild(summaryRow);
 
-  const input = document.createElement("input");
-  input.type = "range";
-  input.min = String(j.range_deg[0]);
-  input.max = String(j.range_deg[1]);
-  input.step = "1";
-  input.value = "0";
-
-  input.addEventListener("input", () => {
-    const v = parseFloat(input.value);
+  const poseSlider = document.createElement("input");
+  poseSlider.type = "range";
+  poseSlider.min = String(j.range_deg[0]);
+  poseSlider.max = String(j.range_deg[1]);
+  poseSlider.step = "1";
+  poseSlider.value = "0";
+  // Interacting with the slider (which lives inside <summary> so it stays
+  // visible while collapsed) must not also toggle the accordion open/
+  // closed; stop the click from reaching <summary>'s own toggle handling.
+  poseSlider.addEventListener("click", (e) => e.stopPropagation());
+  poseSlider.addEventListener("input", () => {
+    const v = parseFloat(poseSlider.value);
     currentAngles[j.name] = v;
     valueSpan.textContent = v.toFixed(0) + "°";
-    updatePose(currentAngles);
+    render();
   });
+  summary.appendChild(poseSlider);
+  details.appendChild(summary);
 
-  row.appendChild(label);
-  row.appendChild(input);
-  slidersContainer.appendChild(row);
+  const body = document.createElement("div");
+  body.className = "joint-details";
 
-  sliderInputs[j.name] = input;
+  function addField(labelText) {
+    const field = document.createElement("div");
+    field.className = "detail-field";
+    const label = document.createElement("span");
+    label.className = "field-label";
+    label.textContent = labelText;
+    field.appendChild(label);
+    body.appendChild(field);
+    return field;
+  }
+
+  // link length into this joint (skip waist_yaw: zero offset, no direction)
+  if (ORIGIN_OFFSET_DIRECTIONS[j.name]) {
+    const field = addField("リンク長 (mm)");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    input.max = "2000";
+    input.step = "1";
+    input.value = String(Math.round(vecLen(j.origin_offset_mm)));
+    input.addEventListener("input", () => {
+      const v = parseFloat(input.value);
+      if (!isFinite(v) || v <= 0) return;
+      setLinkLength(j.name, v);
+      render();
+    });
+    field.appendChild(input);
+    lengthInputs[j.name] = input;
+  }
+
+  // end-effector link length (leaf joints only: neck_pitch, elbow_pitch_l/r)
+  if (j.end_effector_name) {
+    const field = addField("先端リンク長 (mm)");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    input.max = "2000";
+    input.step = "1";
+    input.value = String(Math.round(vecLen(j.end_effector_offset_mm)));
+    input.addEventListener("input", () => {
+      const v = parseFloat(input.value);
+      if (!isFinite(v) || v <= 0) return;
+      setEndEffectorLength(j.name, v);
+      render();
+    });
+    field.appendChild(input);
+    eeLengthInputs[j.name] = input;
+  }
+
+  // rotation range min/max
+  {
+    const field = addField("可動範囲 (deg)");
+    const pair = document.createElement("div");
+    pair.className = "range-pair";
+    const minInput = document.createElement("input");
+    minInput.type = "number";
+    minInput.className = "narrow";
+    minInput.step = "1";
+    minInput.value = String(j.range_deg[0]);
+    const maxInput = document.createElement("input");
+    maxInput.type = "number";
+    maxInput.className = "narrow";
+    maxInput.step = "1";
+    maxInput.value = String(j.range_deg[1]);
+
+    function applyRange() {
+      const lo = parseFloat(minInput.value);
+      const hi = parseFloat(maxInput.value);
+      if (!isFinite(lo) || !isFinite(hi) || lo >= hi) return;
+      j.range_deg = [lo, hi];
+      poseSlider.min = String(lo);
+      poseSlider.max = String(hi);
+      // Mirror Python's _clamp_angle behavior: if the current angle now
+      // falls outside the new range, clamp it and reflect that in the
+      // slider + label (not just rely on forwardKinematics()'s own
+      // internal silent clamp, which would leave the slider showing a
+      // now-invalid value).
+      const current = currentAngles[j.name];
+      const clamped = clampAngle(current, [lo, hi]);
+      if (clamped !== current) {
+        currentAngles[j.name] = clamped;
+        poseSlider.value = String(clamped);
+        valueSpan.textContent = clamped.toFixed(0) + "°";
+      }
+      render();
+    }
+    minInput.addEventListener("input", applyRange);
+    maxInput.addEventListener("input", applyRange);
+    pair.appendChild(minInput);
+    pair.appendChild(document.createTextNode("〜"));
+    pair.appendChild(maxInput);
+    field.appendChild(pair);
+    rangeMinInputs[j.name] = minInput;
+    rangeMaxInputs[j.name] = maxInput;
+  }
+
+  // motor model
+  {
+    const field = addField("モーター");
+    const select = document.createElement("select");
+    for (const motorName of Object.keys(MOTOR_SPECS)) {
+      const opt = document.createElement("option");
+      opt.value = motorName;
+      opt.textContent = motorName;
+      select.appendChild(opt);
+    }
+    select.value = j.motor;
+    select.addEventListener("change", () => {
+      j.motor = select.value;
+      render();
+    });
+    field.appendChild(select);
+    motorSelects[j.name] = select;
+  }
+
+  // rotation axis
+  {
+    const field = addField("回転軸");
+    const select = document.createElement("select");
+    const axisOptions = [
+      ["X", "X (ピッチ想定)"],
+      ["Y", "Y"],
+      ["Z", "Z (ヨー想定)"],
+    ];
+    for (const [value, text] of axisOptions) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      select.appendChild(opt);
+    }
+    select.value = axisToLabel(j.axis);
+    select.addEventListener("change", () => {
+      j.axis = labelToAxis(select.value);
+      render();
+    });
+    field.appendChild(select);
+    axisSelects[j.name] = select;
+  }
+
+  details.appendChild(body);
+  slidersContainer.appendChild(details);
+
+  sliderInputs[j.name] = poseSlider;
   valueLabels[j.name] = valueSpan;
 }
 
+for (const j of JOINTS) buildJointAccordion(j);
+
 document.getElementById("reset-btn").addEventListener("click", () => {
   for (const j of JOINTS) {
+    const def = DEFAULT_JOINTS_BY_NAME[j.name];
+    j.origin_offset_mm = def.origin_offset_mm.slice();
+    j.range_deg = def.range_deg.slice();
+    j.motor = def.motor;
+    j.axis = def.axis.slice();
+    if (def.end_effector_offset_mm) {
+      j.end_effector_offset_mm = def.end_effector_offset_mm.slice();
+    }
     currentAngles[j.name] = 0.0;
+
+    sliderInputs[j.name].min = String(def.range_deg[0]);
+    sliderInputs[j.name].max = String(def.range_deg[1]);
     sliderInputs[j.name].value = "0";
     valueLabels[j.name].textContent = "0°";
+    if (lengthInputs[j.name]) lengthInputs[j.name].value = String(Math.round(vecLen(def.origin_offset_mm)));
+    if (eeLengthInputs[j.name]) eeLengthInputs[j.name].value = String(Math.round(vecLen(def.end_effector_offset_mm)));
+    rangeMinInputs[j.name].value = String(def.range_deg[0]);
+    rangeMaxInputs[j.name].value = String(def.range_deg[1]);
+    motorSelects[j.name].value = def.motor;
+    axisSelects[j.name].value = axisToLabel(def.axis);
   }
-  updatePose(currentAngles);
+  render();
 });
 
 /* =====================================================================
@@ -960,7 +1276,7 @@ function onResize() {
 window.addEventListener("resize", onResize);
 onResize();
 
-updatePose(currentAngles);
+render();
 
 function animate() {
   requestAnimationFrame(animate);
