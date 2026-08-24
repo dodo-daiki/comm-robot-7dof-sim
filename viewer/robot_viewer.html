@@ -201,6 +201,35 @@
     background: #fff;
     max-width: 150px;
   }
+  /* mount-rotation X/Y/Z triplet: reuses .range-pair's flex layout, with
+     small non-interactive axis tags so it's clear which input is which. */
+  .detail-field .axis-tag {
+    font-size: 10px;
+    color: #8a7a63;
+    flex: 0 0 auto;
+  }
+  /* thickness input + its clickable "recommended value" hint, stacked so
+     the hint doesn't force the row to wrap in the 340px panel. */
+  .thickness-control {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+  .thickness-hint {
+    font-size: 10px;
+    color: #8a7a63;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .thickness-hint:hover {
+    color: #5b4d3a;
+  }
 
   #reset-btn {
     width: 100%;
@@ -282,7 +311,18 @@ const ROBOT_CONFIG_DEFAULT = {
   coordinate_frame: "Z-up, X-right, Y-forward, right-handed, units millimeters/degrees. Origin is at ground level below the robot's base mount.",
   // mirrors data/joints.json -> base_height_mm
   base_height_mm: 500,
-  // mirrors data/joints.json -> joints[]
+  // mirrors data/joints.json -> joints[]. NOTE: mount_r{x,y,z}_deg,
+  // link_thickness_mm and end_effector_thickness_mm below are VIEWER-ONLY
+  // extensions with no equivalent in data/joints.json / kinematics.py --
+  // do not add them there. mount_r{x,y,z}_deg default to 0 (identity) for
+  // every joint, which is what keeps forwardKinematics() an exact match
+  // for kinematics.py at this default config (see mountRotationMatrix4 in
+  // Section 2). The *_thickness_mm defaults mirror the rendered radius
+  // each link already used before this control existed (torsoRadius=95,
+  // clavicleRadius=44, limbRadiusUpperArm=50, limbRadiusForearm=42,
+  // limbRadiusNeck=24, all defined in Section 4) times 2, since thickness
+  // here is edited/displayed as a DIAMETER; keep both in sync if those
+  // Section 4 constants ever change.
   joints: [
     {
       name: "waist_yaw",
@@ -293,7 +333,13 @@ const ROBOT_CONFIG_DEFAULT = {
       range_deg: [-90, 90],
       motor: "GIM4310-36",
       gear_ratio: 36,
-      can_id: "TODO"
+      can_id: "TODO",
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0
+      // no link_thickness_mm: waist_yaw has a zero origin_offset_mm (no
+      // incoming link is rendered for it), same reason it has no editable
+      // link length either (see ORIGIN_OFFSET_DIRECTIONS.waist_yaw = null).
     },
     {
       name: "neck_yaw",
@@ -304,7 +350,11 @@ const ROBOT_CONFIG_DEFAULT = {
       range_deg: [-80, 80],
       motor: "GIM4310-10",
       gear_ratio: 10,
-      can_id: "TODO"
+      can_id: "TODO",
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0,
+      link_thickness_mm: 190 // = 2 * torsoRadius (torso capsule: waist_yaw -> neck_yaw)
     },
     {
       name: "neck_pitch",
@@ -317,7 +367,12 @@ const ROBOT_CONFIG_DEFAULT = {
       gear_ratio: 10,
       can_id: "TODO",
       end_effector_name: "head",
-      end_effector_offset_mm: [0, 0, 100]
+      end_effector_offset_mm: [0, 0, 100],
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0,
+      link_thickness_mm: 48, // = 2 * limbRadiusNeck (neckLower capsule: neck_yaw -> neck_pitch)
+      end_effector_thickness_mm: 43.2 // = 2 * (limbRadiusNeck * 0.9) (neckUpper capsule: neck_pitch -> head)
     },
     {
       name: "shoulder_pitch_l",
@@ -328,7 +383,15 @@ const ROBOT_CONFIG_DEFAULT = {
       range_deg: [-90, 150],
       motor: "GIM4310-10",
       gear_ratio: 10,
-      can_id: "TODO"
+      can_id: "TODO",
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0,
+      // clavicle capsule (shoulder_pitch_l <-> shoulder_pitch_r) is shared
+      // between both shoulders; its rendered radius blends both joints'
+      // link_thickness_mm (see render()), same convention its LENGTH
+      // already uses (vecLen of the two origin_offset_mm's difference).
+      link_thickness_mm: 88 // = 2 * clavicleRadius
     },
     {
       name: "elbow_pitch_l",
@@ -341,7 +404,12 @@ const ROBOT_CONFIG_DEFAULT = {
       gear_ratio: 10,
       can_id: "TODO",
       end_effector_name: "hand_l",
-      end_effector_offset_mm: [0, 0, -230]
+      end_effector_offset_mm: [0, 0, -230],
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0,
+      link_thickness_mm: 100, // = 2 * limbRadiusUpperArm (upperArmL capsule: shoulder_pitch_l -> elbow_pitch_l)
+      end_effector_thickness_mm: 84 // = 2 * limbRadiusForearm (forearmL capsule: elbow_pitch_l -> hand_l)
     },
     {
       name: "shoulder_pitch_r",
@@ -352,7 +420,11 @@ const ROBOT_CONFIG_DEFAULT = {
       range_deg: [-90, 150],
       motor: "GIM4310-10",
       gear_ratio: 10,
-      can_id: "TODO"
+      can_id: "TODO",
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0,
+      link_thickness_mm: 88 // = 2 * clavicleRadius (see shoulder_pitch_l comment above)
     },
     {
       name: "elbow_pitch_r",
@@ -365,7 +437,12 @@ const ROBOT_CONFIG_DEFAULT = {
       gear_ratio: 10,
       can_id: "TODO",
       end_effector_name: "hand_r",
-      end_effector_offset_mm: [0, 0, -230]
+      end_effector_offset_mm: [0, 0, -230],
+      mount_rx_deg: 0,
+      mount_ry_deg: 0,
+      mount_rz_deg: 0,
+      link_thickness_mm: 100, // = 2 * limbRadiusUpperArm
+      end_effector_thickness_mm: 84 // = 2 * limbRadiusForearm
     }
   ]
 };
@@ -485,14 +562,45 @@ function rotationMatrix4(axis, angleDeg) {
   ];
 }
 
+// Builds the per-joint "mount orientation" R_mount = Rz(mount_rz) @
+// Ry(mount_ry) @ Rx(mount_rx) (a fixed intrinsic XYZ Euler convention;
+// arbitrary but kept consistent everywhere R_mount is used) from a
+// joint's mount_r{x,y,z}_deg fields, defaulting any missing field to 0 --
+// so this is a safe no-op both for joints from ROBOT_CONFIG_DEFAULT.joints
+// (which HAS these fields, always 0 there -- see Section 1) and for any
+// caller that hands in a plain joint-shaped object without them at all.
+// At angle 0, rotationMatrix4() returns the identity matrix EXACTLY (sin
+// 0 = 0, cos 0 = 1, no floating-point drift), so an all-zero mount
+// reduces this to a true identity and forwardKinematics() below stays a
+// bit-exact match for kinematics.py, which has no concept of mount
+// rotation at all.
+function mountRotationMatrix4(joint) {
+  const Rx = rotationMatrix4([1, 0, 0], joint.mount_rx_deg || 0);
+  const Ry = rotationMatrix4([0, 1, 0], joint.mount_ry_deg || 0);
+  const Rz = rotationMatrix4([0, 0, 1], joint.mount_rz_deg || 0);
+  return mat4Multiply(mat4Multiply(Rz, Ry), Rx);
+}
+
 // Mirrors kinematics.py::joint_transform -- translate by origin_offset_mm,
-// THEN rotate: T @ R.
-function jointTransform(axis, angleDeg, originOffsetMm) {
+// THEN rotate: T @ R -- EXTENDED with an optional per-joint mount
+// rotation R_mount (see mountRotationMatrix4 above; identity when the
+// joint has no mount_r{x,y,z}_deg tilt, which is the only case
+// kinematics.py itself can express):
+//   effective_offset_local = R_mount @ origin_offset_mm  -- the mount
+//     tilts the DIRECTION this link points off its parent; its magnitude
+//     (link length) is unchanged since R_mount is a pure rotation.
+//   R = R_mount @ R_axis(axis, angleDeg)  -- R_mount sits BETWEEN the
+//     parent's (eventual) world rotation and this joint's own axis-angle
+//     rotation, so the rotation axis "follows" the mount tilt too, for
+//     this joint and everything further down the tree.
+function jointTransform(axis, angleDeg, originOffsetMm, mountRotation) {
+  const effectiveOffset = rotateOnly(mountRotation, originOffsetMm);
   const T = mat4Identity();
-  T[3] = originOffsetMm[0];
-  T[7] = originOffsetMm[1];
-  T[11] = originOffsetMm[2];
-  const R = rotationMatrix4(axis, angleDeg);
+  T[3] = effectiveOffset[0];
+  T[7] = effectiveOffset[1];
+  T[11] = effectiveOffset[2];
+  const Raxis = rotationMatrix4(axis, angleDeg);
+  const R = mat4Multiply(mountRotation, Raxis);
   return mat4Multiply(T, R);
 }
 
@@ -556,7 +664,8 @@ function forwardKinematics(jointsList, baseHeightMm, jointAnglesDeg) {
     if (angle === undefined || angle === null) angle = 0.0;
     angle = clampAngle(angle, joint.range_deg);
 
-    const local = jointTransform(joint.axis, angle, joint.origin_offset_mm);
+    const mountRotation = mountRotationMatrix4(joint);
+    const local = jointTransform(joint.axis, angle, joint.origin_offset_mm, mountRotation);
     const world = mat4Multiply(parentWorld, local);
     transforms[joint.name] = world;
 
@@ -627,9 +736,14 @@ for (const j of ROBOT_CONFIG_DEFAULT.joints) DEFAULT_JOINTS_BY_NAME[j.name] = j;
 
 // Fixed unit directions of each joint's origin_offset_mm / end_effector_
 // offset_mm, captured ONCE from the frozen defaults and never recomputed.
-// Editing "link length" in the panel scales a vector's MAGNITUDE along
-// this fixed direction; the direction itself never changes (per the M4
-// brief: "keep its direction fixed, only change the length").
+// This is dir0(J) in the mount-rotation design (Section 2/7): editing
+// "link length" in the panel scales origin_offset_mm's/end_effector_
+// offset_mm's MAGNITUDE along this fixed dir0; dir0 itself never changes
+// (per the M4 brief: "keep its direction fixed, only change the length").
+// The link's actual RENDERED/kinematic direction can still differ from
+// dir0 -- jointTransform() (Section 2) additionally rotates origin_offset_mm
+// by that joint's own mount rotation R_mount at FK time, independent of
+// what's stored here.
 function unitDir(v) {
   const len = vecLen(v);
   if (len < 1e-9) return null; // degenerate (waist_yaw's [0,0,0] offset): no defined direction
@@ -655,6 +769,31 @@ function setEndEffectorLength(jointName, newLengthMm) {
   if (!dir) return;
   const joint = JOINTS_BY_NAME[jointName];
   joint.end_effector_offset_mm = [dir[0] * newLengthMm, dir[1] * newLengthMm, dir[2] * newLengthMm];
+}
+
+// Link thickness (rendered capsule diameter, mm) -- independent of length,
+// stored directly on the joint as link_thickness_mm (incoming link, i.e.
+// the segment from this joint's parent to this joint) / end_effector_
+// thickness_mm (leaf joints only: the segment from this joint out to its
+// end effector). See the ROBOT_CONFIG_DEFAULT comment (Section 1) for how
+// each joint's default maps onto the pre-existing per-limb-type radius
+// constants (Section 4).
+function setLinkThickness(jointName, newDiameterMm) {
+  JOINTS_BY_NAME[jointName].link_thickness_mm = newDiameterMm;
+}
+function setEndEffectorThickness(jointName, newDiameterMm) {
+  JOINTS_BY_NAME[jointName].end_effector_thickness_mm = newDiameterMm;
+}
+
+// Rough rule-of-thumb "recommended thickness" hint shown next to each
+// thickness input, per the M5 brief: recommended_diameter_mm =
+// clamp(length_mm * 0.15, 20, 60), rounded to the nearest 2mm. This is
+// deliberately crude (NOT a structural/FEA calculation) -- the panel
+// labels it clearly as a rough guide (目安値) so it isn't mistaken for a
+// validated engineering result.
+function recommendedThicknessMm(lengthMm) {
+  const raw = Math.min(60, Math.max(20, lengthMm * 0.15));
+  return Math.round(raw / 2) * 2;
 }
 
 function axisToLabel(axis) {
@@ -934,14 +1073,31 @@ scene.add(head);
 function render() {
   const LINK_LENGTHS_MM = computeLinkLengths();
 
-  rebuildCapsule(torso, LINK_LENGTHS_MM.torso, torsoRadius);
-  rebuildCapsule(clavicle, LINK_LENGTHS_MM.clavicle, clavicleRadius);
-  rebuildCapsule(upperArmL, LINK_LENGTHS_MM.upper_arm_l, limbRadiusUpperArm);
-  rebuildCapsule(forearmL, LINK_LENGTHS_MM.forearm_l, limbRadiusForearm);
-  rebuildCapsule(upperArmR, LINK_LENGTHS_MM.upper_arm_r, limbRadiusUpperArm);
-  rebuildCapsule(forearmR, LINK_LENGTHS_MM.forearm_r, limbRadiusForearm);
-  rebuildCapsule(neckLower, LINK_LENGTHS_MM.neck_upper, limbRadiusNeck);
-  rebuildCapsule(neckUpper, LINK_LENGTHS_MM.neck_head, limbRadiusNeck * 0.9);
+  // Capsule radii now come from each joint's own editable *_thickness_mm
+  // (a DIAMETER; /2 for radius) instead of the fixed torsoRadius/
+  // clavicleRadius/limbRadius* constants (Section 4) those fields
+  // defaulted from -- those constants remain only as this mesh's initial
+  // placeholder size before the very first render() call. The clavicle
+  // capsule is shared between BOTH shoulder joints (it spans shoulder_l
+  // <-> shoulder_r), so its radius blends both joints' link_thickness_mm,
+  // the same way its LENGTH already blends both origin_offset_mm's.
+  const clavicleDiameterMm =
+    (JOINTS_BY_NAME.shoulder_pitch_l.link_thickness_mm + JOINTS_BY_NAME.shoulder_pitch_r.link_thickness_mm) / 2;
+
+  rebuildCapsule(torso, LINK_LENGTHS_MM.torso, JOINTS_BY_NAME.neck_yaw.link_thickness_mm / 2);
+  rebuildCapsule(clavicle, LINK_LENGTHS_MM.clavicle, clavicleDiameterMm / 2);
+  rebuildCapsule(upperArmL, LINK_LENGTHS_MM.upper_arm_l, JOINTS_BY_NAME.elbow_pitch_l.link_thickness_mm / 2);
+  rebuildCapsule(forearmL, LINK_LENGTHS_MM.forearm_l, JOINTS_BY_NAME.elbow_pitch_l.end_effector_thickness_mm / 2);
+  rebuildCapsule(upperArmR, LINK_LENGTHS_MM.upper_arm_r, JOINTS_BY_NAME.elbow_pitch_r.link_thickness_mm / 2);
+  rebuildCapsule(forearmR, LINK_LENGTHS_MM.forearm_r, JOINTS_BY_NAME.elbow_pitch_r.end_effector_thickness_mm / 2);
+  rebuildCapsule(neckLower, LINK_LENGTHS_MM.neck_upper, JOINTS_BY_NAME.neck_pitch.link_thickness_mm / 2);
+  rebuildCapsule(neckUpper, LINK_LENGTHS_MM.neck_head, JOINTS_BY_NAME.neck_pitch.end_effector_thickness_mm / 2);
+
+  // Recommended-thickness hints (Section 7 UI) are a function of each
+  // link's CURRENT length, so refresh their text on every render() --
+  // cheap (plain textContent updates on a handful of spans) and keeps
+  // them from going stale after a length edit without extra wiring.
+  updateThicknessHints();
 
   for (const j of JOINTS) {
     rebuildMotorCylinder(motorMeshes[j.name], MOTOR_SPECS[j.motor]);
@@ -980,10 +1136,16 @@ function render() {
   // accumulated world rotation applied to the joint's own local axis
   // vector (rotateOnly), NOT the joint's own world transform (which would
   // incorrectly bake in this joint's own current rotation angle on top of
-  // the axis it's rotating about).
+  // the axis it's rotating about) -- PLUS that joint's own mount rotation
+  // R_mount, inserted between the parent's world rotation and the local
+  // axis, exactly mirroring the R_mount placement in jointTransform()
+  // (Section 2) so a tilted mount visibly reorients the motor cylinder
+  // even when the joint's own pose angle is 0.
   for (const j of JOINTS) {
     const parentWorld = j.parent === null ? baseTransform : T[j.parent];
-    const axisRobot = rotateOnly(parentWorld, j.axis);
+    const mountRotation = mountRotationMatrix4(j);
+    const mountedAxisLocal = rotateOnly(mountRotation, j.axis);
+    const axisRobot = rotateOnly(parentWorld, mountedAxisLocal);
     const axisThree = robotToThree(axisRobot).normalize();
     const jointPosThree = robotToThree(worldPosition(T[j.name]));
     orientAlongDirection(motorMeshes[j.name], jointPosThree, axisThree);
@@ -1083,6 +1245,11 @@ const rangeMinInputs = {};
 const rangeMaxInputs = {};
 const motorSelects = {};
 const axisSelects = {};
+const mountInputs = {}; // { [jointName]: { rx, ry, rz } }, each an entry from makeValidatedNumberInput
+const thicknessInputs = {}; // main (incoming) link thickness, from makeValidatedNumberInput
+const eeThicknessInputs = {}; // end-effector link thickness (leaf joints only)
+const thicknessHintEls = {}; // clickable "recommended thickness" hint buttons
+const eeThicknessHintEls = {};
 
 // Briefly flags a rejected/invalid detail-panel edit with an error style,
 // then clears it -- used so a rejected input doesn't just silently look
@@ -1090,6 +1257,92 @@ const axisSelects = {};
 function flashInvalid(input) {
   input.classList.add("input-invalid");
   window.setTimeout(() => input.classList.remove("input-invalid"), 500);
+}
+
+// Shared live-validated <input type="number"> helper for the new mount-
+// rotation and thickness fields: applies `onValid(v)` (then render())
+// only once the currently-typed text parses to a finite number inside
+// [min, max], exactly like the length inputs' existing "silently reject
+// while typing" precedent above -- an intermediate state like "-" or "-4"
+// (a legitimate stepping-stone) is simply left alone and never stomps
+// the user's in-progress keystrokes/cursor position.
+//
+// Unlike the range min/max inputs, none of these fields drive a SECOND
+// piece of state that clamps against them on every keystroke -- mount
+// rotation doesn't clamp anything, and thickness is purely cosmetic -- so
+// there's no angle-vs-range style destructive clamp to guard against.
+// BUT the exact same "revert-on-invalid-blur" trap that c09f7f3 fixed for
+// the range inputs applies here just as directly: typing e.g. "300" into
+// a [-180,180] field passes through valid intermediates "3" and "30",
+// each of which gets live-applied to the model (that live-update-while-
+// typing IS the intended behavior, same as the range/length inputs).
+// Naively reverting an invalid blur to "the last value that was valid"
+// would revert to "30" -- a mid-typing keystroke the user never intended
+// to commit -- not to what was on the field before this edit began.
+// So, same fix as the range inputs: capture a baseline on FOCUS (the
+// value from before this edit session) and revert to THAT on invalid
+// blur, applying it back through onValid() too since a valid
+// intermediate keystroke may already have pushed a since-abandoned value
+// into the model.
+function makeValidatedNumberInput(initialValue, min, max, onValid) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "1";
+  input.value = String(initialValue);
+  let committedValue = initialValue; // value as of the last blur (or initial/setExternally)
+  let baseline = null; // value to revert to if this edit session ends invalid; set on focus
+  function setExternally(v) {
+    committedValue = v;
+    baseline = null;
+    input.value = String(v);
+  }
+  input.addEventListener("focus", () => {
+    baseline = committedValue;
+  });
+  input.addEventListener("input", () => {
+    const v = parseFloat(input.value);
+    if (!isFinite(v) || v < min || v > max) return;
+    onValid(v);
+    render();
+  });
+  input.addEventListener("blur", () => {
+    const v = parseFloat(input.value);
+    if (!isFinite(v) || v < min || v > max) {
+      const revertTo = baseline === null ? committedValue : baseline;
+      input.value = String(revertTo);
+      onValid(revertTo);
+      render();
+      committedValue = revertTo;
+      flashInvalid(input);
+    } else {
+      committedValue = v;
+    }
+    baseline = null;
+  });
+  return { input, setExternally };
+}
+
+// Refreshes every thickness field's "recommended value" hint text from
+// that link's CURRENT length (vecLen of the same origin_offset_mm / end_
+// effector_offset_mm the length inputs above already show/edit). Called
+// from render() so it can never go stale after a length edit. Purely a
+// rough rule-of-thumb (see recommendedThicknessMm) -- labeled as such
+// (目安値) in the hint text itself, not a validated structural calculation.
+function updateThicknessHints() {
+  for (const j of JOINTS) {
+    const mainHint = thicknessHintEls[j.name];
+    if (mainHint) {
+      const rec = recommendedThicknessMm(vecLen(j.origin_offset_mm));
+      mainHint.textContent = "推奨: 約" + rec + "mm (目安値)";
+      mainHint.dataset.recommended = String(rec);
+    }
+    const eeHint = eeThicknessHintEls[j.name];
+    if (eeHint) {
+      const rec = recommendedThicknessMm(vecLen(j.end_effector_offset_mm));
+      eeHint.textContent = "推奨: 約" + rec + "mm (目安値)";
+      eeHint.dataset.recommended = String(rec);
+    }
+  }
 }
 
 function buildJointAccordion(j) {
@@ -1168,6 +1421,34 @@ function buildJointAccordion(j) {
     lengthInputs[j.name] = input;
   }
 
+  // link thickness (this joint's incoming link's rendered capsule
+  // diameter; skip waist_yaw same as link length above -- it has no
+  // rendered incoming link to size). Stored/edited as a DIAMETER so the
+  // "recommended thickness" hint's clamp(length*0.15, 20, 60) formula
+  // (M5 brief) needs no unit conversion to display or apply.
+  if (ORIGIN_OFFSET_DIRECTIONS[j.name]) {
+    const field = addField("リンク太さ (直径mm)");
+    const wrap = document.createElement("div");
+    wrap.className = "thickness-control";
+    const thickness = makeValidatedNumberInput(j.link_thickness_mm, 5, 300, (v) => setLinkThickness(j.name, v));
+    thicknessInputs[j.name] = thickness;
+    const hint = document.createElement("button");
+    hint.type = "button";
+    hint.className = "thickness-hint";
+    hint.title = "リンク長から算出した目安値です（構造計算ではありません）。クリックで適用。";
+    hint.addEventListener("click", () => {
+      const rec = parseFloat(hint.dataset.recommended);
+      if (!isFinite(rec)) return;
+      thickness.setExternally(rec);
+      setLinkThickness(j.name, rec);
+      render();
+    });
+    thicknessHintEls[j.name] = hint;
+    wrap.appendChild(thickness.input);
+    wrap.appendChild(hint);
+    field.appendChild(wrap);
+  }
+
   // end-effector link length (leaf joints only: neck_pitch, elbow_pitch_l/r)
   if (j.end_effector_name) {
     const field = addField("先端リンク長 (mm)");
@@ -1185,6 +1466,61 @@ function buildJointAccordion(j) {
     });
     field.appendChild(input);
     eeLengthInputs[j.name] = input;
+  }
+
+  // end-effector link thickness (leaf joints only), mirroring the main
+  // link thickness control above.
+  if (j.end_effector_name) {
+    const field = addField("先端リンク太さ (直径mm)");
+    const wrap = document.createElement("div");
+    wrap.className = "thickness-control";
+    const eeThickness = makeValidatedNumberInput(j.end_effector_thickness_mm, 5, 300, (v) => setEndEffectorThickness(j.name, v));
+    eeThicknessInputs[j.name] = eeThickness;
+    const hint = document.createElement("button");
+    hint.type = "button";
+    hint.className = "thickness-hint";
+    hint.title = "リンク長から算出した目安値です（構造計算ではありません）。クリックで適用。";
+    hint.addEventListener("click", () => {
+      const rec = parseFloat(hint.dataset.recommended);
+      if (!isFinite(rec)) return;
+      eeThickness.setExternally(rec);
+      setEndEffectorThickness(j.name, rec);
+      render();
+    });
+    eeThicknessHintEls[j.name] = hint;
+    wrap.appendChild(eeThickness.input);
+    wrap.appendChild(hint);
+    field.appendChild(wrap);
+  }
+
+  // mount rotation X/Y/Z (取付角度): tilts this joint's mount. Its
+  // rotation axis follows the tilt (see mountRotationMatrix4 /
+  // jointTransform, Section 2), and -- for every joint except waist_yaw,
+  // whose origin offset is zero -- its incoming link direction follows
+  // too. Shown for all 7 joints, including waist_yaw, since the axis
+  // still tilts for it even with no link to reorient.
+  {
+    const field = addField("取付角度 (deg)");
+    const pair = document.createElement("div");
+    pair.className = "range-pair";
+    const axisFields = [
+      ["X", "mount_rx_deg", "rx"],
+      ["Y", "mount_ry_deg", "ry"],
+      ["Z", "mount_rz_deg", "rz"],
+    ];
+    const entry = {};
+    for (const [label, key, entryKey] of axisFields) {
+      const tag = document.createElement("span");
+      tag.className = "axis-tag";
+      tag.textContent = label;
+      pair.appendChild(tag);
+      const created = makeValidatedNumberInput(j[key], -180, 180, (v) => { j[key] = v; });
+      created.input.className = "narrow";
+      pair.appendChild(created.input);
+      entry[entryKey] = created;
+    }
+    mountInputs[j.name] = entry;
+    field.appendChild(pair);
   }
 
   // rotation range min/max
@@ -1351,6 +1687,11 @@ document.getElementById("reset-btn").addEventListener("click", () => {
     if (def.end_effector_offset_mm) {
       j.end_effector_offset_mm = def.end_effector_offset_mm.slice();
     }
+    j.mount_rx_deg = def.mount_rx_deg;
+    j.mount_ry_deg = def.mount_ry_deg;
+    j.mount_rz_deg = def.mount_rz_deg;
+    if (def.link_thickness_mm !== undefined) j.link_thickness_mm = def.link_thickness_mm;
+    if (def.end_effector_thickness_mm !== undefined) j.end_effector_thickness_mm = def.end_effector_thickness_mm;
     currentAngles[j.name] = 0.0;
 
     sliderInputs[j.name].min = String(def.range_deg[0]);
@@ -1359,10 +1700,17 @@ document.getElementById("reset-btn").addEventListener("click", () => {
     valueLabels[j.name].textContent = "0°";
     if (lengthInputs[j.name]) lengthInputs[j.name].value = String(Math.round(vecLen(def.origin_offset_mm)));
     if (eeLengthInputs[j.name]) eeLengthInputs[j.name].value = String(Math.round(vecLen(def.end_effector_offset_mm)));
+    if (thicknessInputs[j.name]) thicknessInputs[j.name].setExternally(def.link_thickness_mm);
+    if (eeThicknessInputs[j.name]) eeThicknessInputs[j.name].setExternally(def.end_effector_thickness_mm);
     rangeMinInputs[j.name].value = String(def.range_deg[0]);
     rangeMaxInputs[j.name].value = String(def.range_deg[1]);
     motorSelects[j.name].value = def.motor;
     axisSelects[j.name].value = axisToLabel(def.axis);
+    if (mountInputs[j.name]) {
+      mountInputs[j.name].rx.setExternally(def.mount_rx_deg);
+      mountInputs[j.name].ry.setExternally(def.mount_ry_deg);
+      mountInputs[j.name].rz.setExternally(def.mount_rz_deg);
+    }
   }
   render();
 });
