@@ -1203,6 +1203,40 @@ function buildJointAccordion(j) {
     maxInput.step = "1";
     maxInput.value = String(j.range_deg[1]);
 
+    // Baseline captured when editing starts (on focus): the range AND the
+    // pose angle as they stood BEFORE this edit. Typing a multi-digit
+    // number fires several intermediate "valid" (parseable, lo<hi) states
+    // one keystroke at a time (e.g. "1" -> "12" -> "120"), each of which
+    // is itself a legitimate range. Clamping against the live (already-
+    // clamped) angle on every keystroke would destructively lose the
+    // original pose to a transient narrow range and never recover it once
+    // the rest of the digits are typed. Anchoring every live clamp to the
+    // pre-edit baseAngle instead means the final committed range is what
+    // determines the final angle, regardless of what the range looked
+    // like mid-typing.
+    let baseRange = null;
+    let baseAngle = null;
+    function captureBaseline() {
+      baseRange = j.range_deg.slice();
+      baseAngle = currentAngles[j.name];
+    }
+    // Applies [lo, hi] as the joint's range and re-clamps `fromAngle`
+    // (not whatever currentAngles[j.name] currently holds) against it,
+    // reflecting the result in the slider + label.
+    function commitRange(lo, hi, fromAngle) {
+      j.range_deg = [lo, hi];
+      poseSlider.min = String(lo);
+      poseSlider.max = String(hi);
+      // Mirror Python's _clamp_angle behavior: if the anchor angle falls
+      // outside the new range, clamp it and reflect that in the slider +
+      // label (not just rely on forwardKinematics()'s own internal silent
+      // clamp, which would leave the slider showing a now-invalid value).
+      const clamped = clampAngle(fromAngle, [lo, hi]);
+      currentAngles[j.name] = clamped;
+      poseSlider.value = String(clamped);
+      valueSpan.textContent = clamped.toFixed(0) + "°";
+      render();
+    }
     // Live update while typing: only act once the currently-typed text
     // already parses to a valid range. An intermediate state like "-" or
     // "-4" (a legitimate stepping-stone toward a negative number) simply
@@ -1214,38 +1248,35 @@ function buildJointAccordion(j) {
       if (!isFinite(lo) || !isFinite(hi) || lo >= hi) {
         return;
       }
-      j.range_deg = [lo, hi];
-      poseSlider.min = String(lo);
-      poseSlider.max = String(hi);
-      // Mirror Python's _clamp_angle behavior: if the current angle now
-      // falls outside the new range, clamp it and reflect that in the
-      // slider + label (not just rely on forwardKinematics()'s own
-      // internal silent clamp, which would leave the slider showing a
-      // now-invalid value).
-      const current = currentAngles[j.name];
-      const clamped = clampAngle(current, [lo, hi]);
-      if (clamped !== current) {
-        currentAngles[j.name] = clamped;
-        poseSlider.value = String(clamped);
-        valueSpan.textContent = clamped.toFixed(0) + "°";
-      }
-      render();
+      const anchor = baseAngle === null ? currentAngles[j.name] : baseAngle;
+      commitRange(lo, hi, anchor);
     }
     // Once the user is done editing (blur/change), reject anything that
-    // still isn't a valid range: revert both fields to the last-known-
-    // valid range_deg (rather than leaving the rejected value sitting in
-    // the field, which would look desynced from the actual applied state)
-    // and flash an error style so the rejection is visibly acknowledged.
+    // still isn't a valid range: revert both fields to the range that was
+    // in effect BEFORE this edit began (baseRange), not to whatever the
+    // last transient valid keystroke happened to commit (e.g. typing
+    // "999" into a min field passes through valid intermediates "9" and
+    // "99" before the full value overshoots max -- reverting to "99"
+    // would silently substitute a value the user never intended, despite
+    // the flashed error implying nothing changed). Also flash an error
+    // style so the rejection is visibly acknowledged.
     function revertRangeIfInvalid() {
       const lo = parseFloat(minInput.value);
       const hi = parseFloat(maxInput.value);
       if (!isFinite(lo) || !isFinite(hi) || lo >= hi) {
+        if (baseRange) {
+          commitRange(baseRange[0], baseRange[1], baseAngle);
+        }
         minInput.value = String(j.range_deg[0]);
         maxInput.value = String(j.range_deg[1]);
         flashInvalid(minInput);
         flashInvalid(maxInput);
       }
+      baseRange = null;
+      baseAngle = null;
     }
+    minInput.addEventListener("focus", captureBaseline);
+    maxInput.addEventListener("focus", captureBaseline);
     minInput.addEventListener("input", applyRangeLive);
     maxInput.addEventListener("input", applyRangeLive);
     minInput.addEventListener("blur", revertRangeIfInvalid);
