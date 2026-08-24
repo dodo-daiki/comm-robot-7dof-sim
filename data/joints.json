@@ -1,0 +1,89 @@
+{
+  "coordinate_frame": "Z-up, X-right, Y-forward, right-handed, units millimeters/degrees. Origin is at ground level below the robot's base mount.",
+  "base_height_mm": 500,
+  "joints": [
+    {
+      "name": "waist_yaw",
+      "parent": null,
+      "part_ja": "腰ヨー",
+      "axis": [0, 0, 1],
+      "origin_offset_mm": [0, 0, 0],
+      "range_deg": [-90, 90],
+      "motor": "GIM4310-36",
+      "gear_ratio": 36,
+      "can_id": "TODO"
+    },
+    {
+      "name": "neck_yaw",
+      "parent": "waist_yaw",
+      "part_ja": "首ヨー",
+      "axis": [0, 0, 1],
+      "origin_offset_mm": [0, 0, 300],
+      "range_deg": [-80, 80],
+      "motor": "GIM4310-10",
+      "gear_ratio": 10,
+      "can_id": "TODO"
+    },
+    {
+      "name": "neck_pitch",
+      "parent": "neck_yaw",
+      "part_ja": "首ピッチ",
+      "axis": [0, 1, 0],
+      "origin_offset_mm": [0, 0, 60],
+      "range_deg": [-30, 45],
+      "motor": "GIM4310-10",
+      "gear_ratio": 10,
+      "can_id": "TODO",
+      "end_effector_name": "head",
+      "end_effector_offset_mm": [0, 0, 100]
+    },
+    {
+      "name": "shoulder_pitch_l",
+      "parent": "waist_yaw",
+      "part_ja": "左肩ピッチ",
+      "axis": [0, 1, 0],
+      "origin_offset_mm": [-150, 0, 300],
+      "range_deg": [-90, 150],
+      "motor": "GIM4310-10",
+      "gear_ratio": 10,
+      "can_id": "TODO"
+    },
+    {
+      "name": "elbow_pitch_l",
+      "parent": "shoulder_pitch_l",
+      "part_ja": "左肘ピッチ",
+      "axis": [0, 1, 0],
+      "origin_offset_mm": [0, 0, -250],
+      "range_deg": [0, 140],
+      "motor": "GIM4310-10",
+      "gear_ratio": 10,
+      "can_id": "TODO",
+      "end_effector_name": "hand_l",
+      "end_effector_offset_mm": [0, 0, -230]
+    },
+    {
+      "name": "shoulder_pitch_r",
+      "parent": "waist_yaw",
+      "part_ja": "右肩ピッチ",
+      "axis": [0, 1, 0],
+      "origin_offset_mm": [150, 0, 300],
+      "range_deg": [-90, 150],
+      "motor": "GIM4310-10",
+      "gear_ratio": 10,
+      "can_id": "TODO"
+    },
+    {
+      "name": "elbow_pitch_r",
+      "parent": "shoulder_pitch_r",
+      "part_ja": "右肘ピッチ",
+      "axis": [0, 1, 0],
+      "origin_offset_mm": [0, 0, -250],
+      "range_deg": [0, 140],
+      "motor": "GIM4310-10",
+      "gear_ratio": 10,
+      "can_id": "TODO",
+      "end_effector_name": "hand_r",
+      "end_effector_offset_mm": [0, 0, -230]
+    }
+  ]
+}
