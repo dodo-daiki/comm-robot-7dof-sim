@@ -1,6 +1,12 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
+<!--
+  This file intentionally has NO <!DOCTYPE>/<html>/<head>/<body> wrapper
+  tags of its own: it is designed to be published as a Claude Artifact,
+  whose publisher supplies its own <!doctype>...<head>...<body> skeleton
+  and wraps this file's content as the body. HTML5's lenient "tag soup"
+  parser auto-hoists <meta>/<title>/<style> that appear before any real
+  body content into an implicit <head>, so this same fragment also opens
+  correctly and independently when double-clicked directly (file://).
+-->
 <meta charset="UTF-8">
 <title>Robot Skeleton Viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -99,19 +105,17 @@
     pointer-events: none;
   }
 </style>
-</head>
-<body>
 
 <div id="canvas-container"></div>
 
 <div id="ui-panel">
-  <h1>7-DOF コミュニケーションロボット ビューア</h1>
+  <h1>7-DOFロボット<br>ビューア</h1>
   <p class="subtitle">各関節のスライダーで姿勢を操作できます。<br>マウスドラッグ: 視点回転 / ホイール: ズーム</p>
   <div id="joint-sliders"></div>
   <button id="reset-btn" type="button">ゼロ姿勢にリセット</button>
 </div>
 
-<div id="hint">file:// でもそのまま動作します（外部通信なし）</div>
+<div id="hint">単一HTMLファイル・外部通信なし</div>
 
 <!-- ================================================================
      Three.js r160 (UMD global build), embedded inline so this file has
@@ -434,6 +438,21 @@ function vecLen(v) {
 }
 
 const LINK_LENGTHS_MM = {
+  // torso: waist_yaw -> neck_yaw. Both neck_yaw and the two shoulders share
+  // the same +300mm Z offset from waist_yaw (see data/joints.json), and a
+  // Z-axis rotation (waist_yaw's own axis) never changes a vector's Z
+  // component, so this distance is constant regardless of waist_yaw's
+  // angle -- exactly like every other link length below, all of which are
+  // computed from a joint's origin_offset_mm/end_effector_offset_mm rather
+  // than hardcoded, so they can't silently desync from data/joints.json.
+  torso: vecLen(JOINTS_BY_NAME.neck_yaw.origin_offset_mm),
+  // clavicle: shoulder_pitch_l -> shoulder_pitch_r, a straight line that
+  // bridges the torso's tapered top to both shoulder ball joints. Also
+  // constant for the same reason (both shoulder offsets share the same Z
+  // and Y; only their (rotating) X differs, by a fixed magnitude).
+  clavicle: Math.abs(
+    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[0] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[0]
+  ),
   neck_upper: vecLen(JOINTS_BY_NAME.neck_pitch.origin_offset_mm), // neck_yaw -> neck_pitch
   neck_head: vecLen(JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm), // neck_pitch -> head
   upper_arm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.origin_offset_mm), // shoulder -> elbow
@@ -461,8 +480,11 @@ const camera = new THREE.PerspectiveCamera(40, 1, 10, 10000);
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
 scene.add(ambientLight);
 
-const keyLight = new THREE.DirectionalLight(0xfff3e0, 1.1);
-keyLight.position.set(900, 1400, 700);
+// Key light sits roughly alongside the default camera (see camTheta below,
+// which starts on the three.js -Z side so the painted face is visible), so
+// the camera-facing side of the mannequin is well lit instead of backlit.
+const keyLight = new THREE.DirectionalLight(0xfff3e0, 1.15);
+keyLight.position.set(700, 1500, -950);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(1024, 1024);
 keyLight.shadow.camera.left = -900;
@@ -473,8 +495,10 @@ keyLight.shadow.camera.near = 10;
 keyLight.shadow.camera.far = 3500;
 scene.add(keyLight);
 
-const fillLight = new THREE.DirectionalLight(0xdce8ff, 0.35);
-fillLight.position.set(-800, 500, -600);
+// Rim/back light on the opposite side from the key light, for a bit of
+// separation from the background rather than doing any real fill work.
+const fillLight = new THREE.DirectionalLight(0xdce8ff, 0.4);
+fillLight.position.set(-700, 900, 900);
 scene.add(fillLight);
 
 // ---- ground ----
@@ -510,8 +534,17 @@ const jointMat = new THREE.MeshStandardMaterial({ color: JOINT_COLOR, roughness:
 const pedestalMat = new THREE.MeshStandardMaterial({ color: PEDESTAL_COLOR, roughness: 0.8, metalness: 0.15 });
 
 // ---- pedestal (static; robot sits on a stand of height base_height_mm) ----
-const pedestalRadius = 110;
-const pedestalGeo = new THREE.CylinderGeometry(pedestalRadius, pedestalRadius * 1.15, BASE_HEIGHT_MM, 32);
+// Narrow at the top and flared at the base for a stable "stand" look, kept
+// clear of the arms: in zero pose the hands sit at z=320mm/radius=150mm
+// from the central axis, and the arm capsules themselves get as close as
+// ~116-123mm from that axis (150mm minus each capsule's own tube radius),
+// all within the pedestal's 0-500mm height range. This radius/taper keeps
+// >20mm clearance from that closest arm approach across the whole pedestal
+// height (an earlier, wider pedestal left only a few mm and visibly
+// clipped the forearms).
+const pedestalRadiusTop = 80;
+const pedestalRadiusBottom = 120;
+const pedestalGeo = new THREE.CylinderGeometry(pedestalRadiusTop, pedestalRadiusBottom, BASE_HEIGHT_MM, 32);
 const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
 pedestal.position.set(0, BASE_HEIGHT_MM / 2, 0); // robot (0,0,base/2) -> three (0, base/2, 0)
 pedestal.castShadow = true;
@@ -520,7 +553,7 @@ scene.add(pedestal);
 
 // small cap disc at the very top of the pedestal (where waist_yaw sits)
 const pedestalCap = new THREE.Mesh(
-  new THREE.CylinderGeometry(pedestalRadius, pedestalRadius, 12, 32),
+  new THREE.CylinderGeometry(pedestalRadiusTop, pedestalRadiusTop, 12, 32),
   pedestalMat
 );
 pedestalCap.position.set(0, BASE_HEIGHT_MM, 0);
@@ -558,10 +591,24 @@ function orientSphereJoint(mesh, p3) {
 // Spans from the waist_yaw pivot up to the neck_yaw attachment height,
 // which is also the shoulder attachment height (both offset +300mm in Z
 // from waist_yaw per data/joints.json), so it reads as a body connecting
-// the pedestal to the shoulder/neck line.
+// the pedestal to the shoulder/neck line. Length comes from
+// LINK_LENGTHS_MM.torso (derived from data/joints.json), not a hardcoded
+// constant, so it can't silently desync if that offset ever changes.
 const torsoRadius = 100;
-const torso = makeCapsule(300, torsoRadius, mannequinMat); // 300mm placeholder length, replaced by real endpoints below (geometry regenerated once torso is rigid & length is constant so this is exact)
+const torso = makeCapsule(LINK_LENGTHS_MM.torso, torsoRadius, mannequinMat);
 scene.add(torso);
+
+// ---- clavicle (static visual connector, NOT a kinematic joint) ----
+// A capsule spanning shoulder_pitch_l -> shoulder_pitch_r, passing right
+// through the torso's tapered top (both endpoints and the torso's own top
+// share the same world Z height -- see LINK_LENGTHS_MM.torso comment).
+// A capsule's hemispherical caps mean the torso alone tapers to near-zero
+// radius right where the shoulder balls are, leaving a visible air gap;
+// this bar bridges torso -> clavicle -> shoulder ball -> upper arm into
+// one continuous silhouette instead of floating disconnected limbs.
+const clavicleRadius = 44;
+const clavicle = makeCapsule(LINK_LENGTHS_MM.clavicle, clavicleRadius, mannequinMat);
+scene.add(clavicle);
 
 // ---- limbs ----
 const limbRadiusUpperArm = 34;
@@ -669,7 +716,19 @@ function buildFaceTexture() {
 }
 
 const faceTexture = buildFaceTexture();
-const faceMat = new THREE.MeshBasicMaterial({ map: faceTexture, transparent: true, depthWrite: false });
+// MeshStandardMaterial (not MeshBasicMaterial) so the face patch picks up
+// the same directional/ambient lighting as the head sphere it sits on --
+// an unlit material here would look like a flat, mismatched decal glued
+// on top instead of part of the head. Base color stays white so the
+// texture's own painted colors (which already match MANNEQUIN_COLOR for
+// the background disc) aren't double-tinted.
+const faceMat = new THREE.MeshStandardMaterial({
+  map: faceTexture,
+  transparent: true,
+  depthWrite: false,
+  roughness: 0.7,
+  metalness: 0.05,
+});
 const facePlaneSize = headRadius * 1.5;
 const facePlane = new THREE.Mesh(new THREE.PlaneGeometry(facePlaneSize, facePlaneSize), faceMat);
 scene.add(facePlane);
@@ -694,6 +753,8 @@ function updatePose(jointAnglesDeg) {
 
   // torso: static connector between waist pivot and neck/shoulder line
   orientBetween(torso, pWaist, pNeckYaw);
+  // clavicle: static connector bridging the torso top to both shoulders
+  orientBetween(clavicle, pShoulderL, pShoulderR);
 
   // limbs
   orientBetween(upperArmL, pShoulderL, pElbowL);
@@ -719,13 +780,50 @@ function updatePose(jointAnglesDeg) {
   // head
   head.position.copy(pHead);
 
-  // face plane: mounted on the head, forward direction taken from the
-  // head/neck_pitch world rotation's local +Y (robot "forward") column.
-  const forwardRobot = rotationColumn(T.head, 1); // local Y column of head's world rotation
+  // Face plane: mounted on the head. T.head's rotation part is identical to
+  // neck_pitch's world rotation (the end-effector transform only translates
+  // -- see forwardKinematics), so its local X/Y/Z columns give the head's
+  // actual world-space right/forward/up directions.
+  //
+  // Orientation uses the FULL basis (right, up, forward), not
+  // setFromUnitVectors(defaultNormal, forwardThree): setFromUnitVectors only
+  // pins the plane's normal to the forward direction and leaves the twist
+  // (rotation about that forward axis) unconstrained/arbitrary. At exactly
+  // neck_pitch=0 that arbitrary twist happens to come out right-side-up by
+  // luck, but at any nonzero neck_pitch it does not -- e.g. the mouth ends
+  // up above the eyes. Building an explicit basis from the FK rotation's own
+  // up column fixes the twist to the head's actual tilt, at every angle.
+  const rightRobot = rotationColumn(T.head, 0); // local X column (right)
+  const forwardRobot = rotationColumn(T.head, 1); // local Y column (forward)
+  const upRobot = rotationColumn(T.head, 2); // local Z column (up)
+  // NOTE the .negate(): for any proper rotation matrix's own columns
+  // c0/c1/c2, the identity c0 x c2 = -c1 always holds (both robot-space and,
+  // since robotToThree() is itself a proper rotation, three-space too --
+  // proper rotations preserve cross products). So plain
+  // rightThree x upThree = -forwardThree, which makes
+  // makeBasis(rightThree, upThree, forwardThree) below an IMPROPER matrix
+  // (a reflection, det = -1): setFromRotationMatrix() cannot extract a
+  // valid rotation quaternion from that and silently produces garbage,
+  // which is why the face disappeared/warped when this was first tried
+  // without the negation. Negating right restores
+  // rightThree x upThree = +forwardThree (a proper rotation), at the cost
+  // of mirroring left/right -- invisible here since the painted face
+  // (eyes/blush/mouth) is left-right symmetric.
+  const rightThree = robotToThree(rightRobot).normalize().negate();
   const forwardThree = robotToThree(forwardRobot).normalize();
-  const facePos = pHead.clone().add(forwardThree.clone().multiplyScalar(headRadius * 0.97));
+  const upThree = robotToThree(upRobot).normalize();
+  //
+  // Clearance from the head sphere: the plane must sit entirely OUTSIDE the
+  // sphere (offset > headRadius at the plane's own center, its closest
+  // point to the head), or the sphere's surface intersects/depth-fights the
+  // flat plane right where the eyes/mouth are painted (a visible "snout"
+  // artifact). A flat fixed offset comfortably clears the whole plane,
+  // including its center, at every point.
+  const faceOffsetMm = headRadius + 6;
+  const facePos = pHead.clone().add(forwardThree.clone().multiplyScalar(faceOffsetMm));
   facePlane.position.copy(facePos);
-  facePlane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), forwardThree);
+  const faceBasis = new THREE.Matrix4().makeBasis(rightThree, upThree, forwardThree);
+  facePlane.quaternion.setFromRotationMatrix(faceBasis);
 }
 
 /* =====================================================================
@@ -871,5 +969,3 @@ function animate() {
 }
 animate();
 </script>
-</body>
-</html>
