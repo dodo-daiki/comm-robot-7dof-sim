@@ -108,21 +108,30 @@
     list-style: none;
     cursor: pointer;
     padding: 8px 10px;
-    display: block;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
   }
   details.joint-accordion > summary::-webkit-details-marker {
     display: none;
   }
+  /* Caret is a flex ITEM sibling of .summary-content (not a block-level
+     child stacked above it) so it sits beside the joint name instead of
+     landing on its own line. */
   details.joint-accordion > summary::before {
     content: "\25B8";
-    display: inline-block;
-    width: 12px;
+    flex: 0 0 auto;
     color: #8a7a63;
     font-size: 10px;
+    line-height: 1.7;
     transition: transform 0.15s ease;
   }
   details.joint-accordion[open] > summary::before {
     transform: rotate(90deg);
+  }
+  .summary-content {
+    flex: 1 1 auto;
+    min-width: 0;
   }
   .accordion-summary-row {
     display: flex;
@@ -130,7 +139,6 @@
     font-size: 12.5px;
     color: #333;
     margin-bottom: 4px;
-    margin-left: 14px;
   }
   .accordion-summary-row .joint-name {
     font-weight: 600;
@@ -140,8 +148,7 @@
     font-variant-numeric: tabular-nums;
   }
   details.joint-accordion input[type="range"] {
-    width: calc(100% - 14px);
-    margin-left: 14px;
+    width: 100%;
     accent-color: #8a7a63;
     display: block;
   }
@@ -177,6 +184,14 @@
   }
   .detail-field input[type="number"].narrow {
     width: 52px;
+  }
+  /* Brief flash shown when a rejected edit (e.g. min >= max) is reverted,
+     so the field visibly acknowledges the rejection instead of silently
+     looking desynced from the actual applied state. */
+  .detail-field input[type="number"].input-invalid {
+    border-color: #c0453f;
+    background: #fbe9e7;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
   }
   .detail-field select {
     font-size: 11.5px;
@@ -371,6 +386,10 @@ const ROBOT_CONFIG_DEFAULT = {
  * ===================================================================== */
 
 const MOTOR_SPECS = {
+  // Dimensions from the same product pages robot/motor_specs.py's
+  // source_url fields already point to for these two models:
+  //   GIM4310-10: Ø53 x 32mm -- https://aifitlab.com/products/steadywin-gim4310-10-planetary-reducer-servo-motor
+  //   GIM4310-36: Ø55 x 47mm -- https://lucidar.me/en/actuators/mit-motor-gim4310-36/
   "GIM4310-10": { name: "GIM4310-10", diameter_mm: 53, length_mm: 32, weight_g: 217 },
   "GIM4310-36": { name: "GIM4310-36", diameter_mm: 55, length_mm: 47, weight_g: 310 },
 };
@@ -827,19 +846,27 @@ function orientBetween(mesh, pA3, pB3) {
 }
 
 // ---- torso (static visual connector, NOT a kinematic joint) ----
-const torsoRadius = 128;
+const torsoRadius = 95;
 const torso = makePlaceholderCapsule(torsoRadius, mannequinMat);
 scene.add(torso);
 
 // ---- clavicle (static visual connector, NOT a kinematic joint) ----
-const clavicleRadius = 56;
+const clavicleRadius = 44;
 const clavicle = makePlaceholderCapsule(clavicleRadius, mannequinMat);
 scene.add(clavicle);
 
 // ---- limbs: chunky, toy-proportioned (thick radius relative to length) ----
+// limbRadiusNeck is deliberately much thinner than the other limbs (and
+// only a little thicker than a GIM4310-10's own 26.5mm radius): a fat
+// neck at the old radius (40mm) buried the neck_pitch motor's sideways-
+// pointing rotation pin entirely, which was the direct cause of neck_yaw
+// being a total visual no-op (nothing asymmetric was ever exposed to
+// visibly swing when the yaw joint rotated). A slim neck plus a smaller
+// head (see headRadius below) leaves that pin -- and the visible neck
+// silhouette itself -- clear of both the torso and the head.
 const limbRadiusUpperArm = 50;
 const limbRadiusForearm = 42;
-const limbRadiusNeck = 40;
+const limbRadiusNeck = 24;
 
 const upperArmL = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat);
 const forearmL = makePlaceholderCapsule(limbRadiusForearm, mannequinMat);
@@ -877,7 +904,16 @@ scene.add(handL, handR);
 // semantics. Do not confuse this with the neck's actual link lengths
 // (neck_upper/neck_head in computeLinkLengths()), which stay real,
 // meaningful, user-editable dimensions in the detail panel.
-const headRadius = 165;
+//
+// Sized so it still reads as an exaggerated "big head" chibi proportion
+// without engulfing the neck: at zero pose the head's bottom edge
+// (headZ - headRadius) sits above neck_pitch's own position, leaving the
+// neck_pitch motor and a visible sliver of the neck capsules clear of the
+// head, and well clear of the torso (an earlier, larger radius of 165mm
+// overlapped the torso capsule by over 100mm and fully swallowed both
+// neck motors, which was the direct cause of neck_yaw's rotation being
+// completely invisible -- see the limbRadiusNeck comment above).
+const headRadius = 105;
 const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 32, 24), headMat);
 head.castShadow = true;
 head.receiveShadow = true;
@@ -1048,12 +1084,25 @@ const rangeMaxInputs = {};
 const motorSelects = {};
 const axisSelects = {};
 
+// Briefly flags a rejected/invalid detail-panel edit with an error style,
+// then clears it -- used so a rejected input doesn't just silently look
+// desynced from the actually-applied state.
+function flashInvalid(input) {
+  input.classList.add("input-invalid");
+  window.setTimeout(() => input.classList.remove("input-invalid"), 500);
+}
+
 function buildJointAccordion(j) {
   const details = document.createElement("details");
   details.className = "joint-accordion";
   details.dataset.joint = j.name;
 
   const summary = document.createElement("summary");
+  // Wrapped in its own flex item (.summary-content) so the caret
+  // (summary::before) sits as a proper flex sibling beside this content
+  // instead of stacking above it as a disconnected block.
+  const summaryContent = document.createElement("div");
+  summaryContent.className = "summary-content";
   const summaryRow = document.createElement("div");
   summaryRow.className = "accordion-summary-row";
   const nameSpan = document.createElement("span");
@@ -1064,7 +1113,7 @@ function buildJointAccordion(j) {
   valueSpan.textContent = "0°";
   summaryRow.appendChild(nameSpan);
   summaryRow.appendChild(valueSpan);
-  summary.appendChild(summaryRow);
+  summaryContent.appendChild(summaryRow);
 
   const poseSlider = document.createElement("input");
   poseSlider.type = "range";
@@ -1082,7 +1131,8 @@ function buildJointAccordion(j) {
     valueSpan.textContent = v.toFixed(0) + "°";
     render();
   });
-  summary.appendChild(poseSlider);
+  summaryContent.appendChild(poseSlider);
+  summary.appendChild(summaryContent);
   details.appendChild(summary);
 
   const body = document.createElement("div");
@@ -1156,7 +1206,17 @@ function buildJointAccordion(j) {
     function applyRange() {
       const lo = parseFloat(minInput.value);
       const hi = parseFloat(maxInput.value);
-      if (!isFinite(lo) || !isFinite(hi) || lo >= hi) return;
+      if (!isFinite(lo) || !isFinite(hi) || lo >= hi) {
+        // Reject: revert both fields to the last-known-valid range_deg
+        // (rather than leaving the rejected value sitting in the field,
+        // which would look desynced from the actual applied state) and
+        // flash an error style so the rejection is visibly acknowledged.
+        minInput.value = String(j.range_deg[0]);
+        maxInput.value = String(j.range_deg[1]);
+        flashInvalid(minInput);
+        flashInvalid(maxInput);
+        return;
+      }
       j.range_deg = [lo, hi];
       poseSlider.min = String(lo);
       poseSlider.max = String(hi);
