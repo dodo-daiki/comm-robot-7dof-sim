@@ -372,7 +372,7 @@ const ROBOT_CONFIG_DEFAULT = {
       mount_ry_deg: 0,
       mount_rz_deg: 0,
       link_thickness_mm: 48, // = 2 * limbRadiusNeck (neckLower capsule: neck_yaw -> neck_pitch)
-      end_effector_thickness_mm: 43.2 // = 2 * (limbRadiusNeck * 0.9) (neckUpper capsule: neck_pitch -> head)
+      end_effector_thickness_mm: 44 // ~= 2 * (limbRadiusNeck * 0.9) = 43.2, rounded to an integer so it doesn't trip the input's step="1" validity check (an 0.4mm/1.9% difference from the un-rounded neckUpper capsule radius, imperceptible)
     },
     {
       name: "shoulder_pitch_l",
@@ -813,18 +813,25 @@ function labelToAxis(label) {
 // so they can't silently desync from either data/joints.json or the
 // panel's live edits.
 function computeLinkLengths() {
-  const shoulderDelta = [
-    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[0] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[0],
-    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[1] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[1],
-    JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm[2] - JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm[2],
-  ];
   return {
     // torso: waist_yaw -> neck_yaw (static visual connector, not a joint).
+    // A parent->child span like this is unaffected by mount rotation --
+    // |R_mount . origin_offset_mm| == |origin_offset_mm| since R_mount is
+    // a pure rotation -- so computing it from the raw config offset here
+    // (rather than from FK world positions, like the clavicle below) is
+    // still exactly correct even with a nonzero mount rotation on neck_yaw.
     torso: vecLen(JOINTS_BY_NAME.neck_yaw.origin_offset_mm),
-    // clavicle: shoulder_pitch_l -> shoulder_pitch_r, full 3D distance (not
-    // just an X delta) so it stays correct even if the panel is used to
-    // edit the two shoulders' link lengths asymmetrically.
-    clavicle: vecLen(shoulderDelta),
+    // NOTE: clavicle (shoulder_pitch_l <-> shoulder_pitch_r) is NOT listed
+    // here. Unlike every other capsule above, which spans a parent->child
+    // pair (length-preserving under mount rotation, see the torso comment),
+    // the clavicle spans two SIBLINGS -- its true length is
+    // |R_mount_l.offset_l - R_mount_r.offset_r|, which does NOT reduce to
+    // the un-rotated |offset_l - offset_r| once either shoulder has a
+    // nonzero mount rotation. It's instead computed directly from the two
+    // shoulders' actual FK world positions in render() (same bug class as
+    // the "floating arms" issue fixed in 030d5b2 -- always derive a
+    // cross-branch span from real FK positions, never from raw config
+    // offsets minus each other).
     neck_upper: vecLen(JOINTS_BY_NAME.neck_pitch.origin_offset_mm), // neck_yaw -> neck_pitch
     neck_head: vecLen(JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm), // neck_pitch -> head
     upper_arm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.origin_offset_mm), // shoulder -> elbow
@@ -1085,7 +1092,10 @@ function render() {
     (JOINTS_BY_NAME.shoulder_pitch_l.link_thickness_mm + JOINTS_BY_NAME.shoulder_pitch_r.link_thickness_mm) / 2;
 
   rebuildCapsule(torso, LINK_LENGTHS_MM.torso, JOINTS_BY_NAME.neck_yaw.link_thickness_mm / 2);
-  rebuildCapsule(clavicle, LINK_LENGTHS_MM.clavicle, clavicleDiameterMm / 2);
+  // clavicle's capsule is rebuilt further down, once pShoulderL/pShoulderR
+  // (real FK world positions) are available -- see the computeLinkLengths()
+  // comment above for why its length can't be derived from raw config
+  // offsets the way every other capsule's can.
   rebuildCapsule(upperArmL, LINK_LENGTHS_MM.upper_arm_l, JOINTS_BY_NAME.elbow_pitch_l.link_thickness_mm / 2);
   rebuildCapsule(forearmL, LINK_LENGTHS_MM.forearm_l, JOINTS_BY_NAME.elbow_pitch_l.end_effector_thickness_mm / 2);
   rebuildCapsule(upperArmR, LINK_LENGTHS_MM.upper_arm_r, JOINTS_BY_NAME.elbow_pitch_r.link_thickness_mm / 2);
@@ -1120,7 +1130,13 @@ function render() {
 
   // torso: static connector between waist pivot and neck/shoulder line
   orientBetween(torso, pWaist, pNeckYaw);
-  // clavicle: static connector bridging the torso top to both shoulders
+  // clavicle: static connector bridging the torso top to both shoulders.
+  // Length comes from the two shoulders' ACTUAL FK world positions (not
+  // vecLen of their raw config offsets minus each other -- see the
+  // computeLinkLengths() comment) so a mount rotation on either shoulder
+  // can't pull it into a visible gap/overhang: this stays the true
+  // straight-line distance between where the shoulders really ended up.
+  rebuildCapsule(clavicle, pShoulderL.distanceTo(pShoulderR), clavicleDiameterMm / 2);
   orientBetween(clavicle, pShoulderL, pShoulderR);
 
   // limbs
@@ -1288,6 +1304,14 @@ function makeValidatedNumberInput(initialValue, min, max, onValid) {
   const input = document.createElement("input");
   input.type = "number";
   input.step = "1";
+  // Native min/max attributes so the browser's own spinner (and any other
+  // native validation UI) can't walk the DISPLAYED text past what onValid/
+  // the blur handler below actually enforce -- without these the spinner
+  // could show e.g. 183 in a [-180,180] field while the model stays capped
+  // at 180 until blur reverts the display, which is confusing even though
+  // nothing is corrupted.
+  input.min = String(min);
+  input.max = String(max);
   input.value = String(initialValue);
   let committedValue = initialValue; // value as of the last blur (or initial/setExternally)
   let baseline = null; // value to revert to if this edit session ends invalid; set on focus
