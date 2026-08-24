@@ -81,6 +81,48 @@ def test_rotated_parent_with_offset_child_matches_hand_computed_pose(config):
     np.testing.assert_allclose(hand_l, expected_hand_l, atol=1e-6)
 
 
+def test_neck_yaw_and_pitch_move_head_to_hand_computed_pose(config):
+    # Regression test for the M1 review finding: reverting neck_pitch's axis
+    # to the old (buggy) convention left the rest of the suite green because
+    # no other test exercised the neck branch with a nonzero neck_pitch. This
+    # test locks neck_yaw + neck_pitch composition to an independently
+    # hand-computed expected position.
+    #
+    # Hand computation (NOT via robot.kinematics), done from scratch:
+    #   waist_yaw = 0  =>  R_waist = I, p_waist = (0, 0, 500)   [base_height_mm]
+    #   neck_yaw:   p_neck_yaw = p_waist + R_waist @ (0, 0, 300) = (0, 0, 800)
+    #               R_neck_yaw = R_waist @ Rz(60)
+    #   neck_pitch: p_neck_pitch = p_neck_yaw + R_neck_yaw @ (0, 0, 60)
+    #                            = (0, 0, 800) + Rz(60) @ (0, 0, 60)
+    #               Rz(60) leaves a vector along its own rotation axis (Z)
+    #               unchanged, so Rz(60) @ (0, 0, 60) = (0, 0, 60)
+    #               => p_neck_pitch = (0, 0, 860)
+    #               R_neck_pitch = R_neck_yaw @ Rx(30)
+    #   head:       p_head = p_neck_pitch + R_neck_pitch @ (0, 0, 100)
+    #
+    #   Rx(30) @ (0, 0, 100):
+    #     Rx(t) = [[1,0,0],[0,cos t,-sin t],[0,sin t,cos t]]
+    #     = (0, -100*sin30, 100*cos30) = (0, -50, 86.60254037844386)
+    #
+    #   Rz(60) @ (0, -50, 86.60254037844386):
+    #     Rz(t) = [[cos t,-sin t,0],[sin t,cos t,0],[0,0,1]]
+    #     x' = cos60*0 - sin60*(-50) = 43.301270189221935
+    #     y' = sin60*0 + cos60*(-50) = -25.0
+    #     z' = 86.60254037844386  (unchanged by a Z rotation)
+    #
+    #   p_head = (0, 0, 860) + (43.301270189221935, -25.0, 86.60254037844386)
+    #          = (43.301270189221935, -25.0, 946.6025403784439)
+    #
+    # This matches the ~[43.3, -25.0, 946.6] figure given in the milestone
+    # brief, confirmed here by an independent from-scratch derivation rather
+    # than by trusting that figure or forward_kinematics itself.
+    transforms = forward_kinematics(config, {"neck_yaw": 60.0, "neck_pitch": 30.0})
+    head = world_position(transforms["head"])
+
+    expected_head = [43.301270189221935, -25.0, 946.6025403784439]
+    np.testing.assert_allclose(head, expected_head, atol=1e-9)
+
+
 def test_out_of_range_angle_is_clamped_not_raised(config):
     lo, hi = config.joints["elbow_pitch_l"].range_deg
 
