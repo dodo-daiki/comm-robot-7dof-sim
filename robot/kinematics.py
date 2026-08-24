@@ -8,7 +8,10 @@ from robot.joints import RobotConfig
 
 
 def _rotation_matrix(axis: np.ndarray, angle_deg: float) -> np.ndarray:
-    axis = axis / np.linalg.norm(axis)
+    norm = np.linalg.norm(axis)
+    if norm == 0:
+        raise ValueError("Rotation axis must be non-zero.")
+    axis = axis / norm
     theta = np.radians(angle_deg)
     kx, ky, kz = axis
     K = np.array([

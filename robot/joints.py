@@ -31,8 +31,15 @@ class RobotConfig:
         self.joints: dict[str, Joint] = {}
         self.root: Joint | None = None
 
+        roots: list[Joint] = []
         for entry in data["joints"]:
+            end_effector_name = entry.get("end_effector_name")
             end_effector_offset = entry.get("end_effector_offset_mm")
+            if (end_effector_name is None) != (end_effector_offset is None):
+                raise ValueError(
+                    f"Joint '{entry['name']}' must set both 'end_effector_name' and "
+                    "'end_effector_offset_mm' together, or neither."
+                )
             joint = Joint(
                 name=entry["name"],
                 parent=entry["parent"],
@@ -43,7 +50,7 @@ class RobotConfig:
                 motor=entry["motor"],
                 gear_ratio=entry["gear_ratio"],
                 can_id=entry["can_id"],
-                end_effector_name=entry.get("end_effector_name"),
+                end_effector_name=end_effector_name,
                 end_effector_offset_mm=(
                     np.array(end_effector_offset, dtype=float)
                     if end_effector_offset is not None
@@ -52,10 +59,20 @@ class RobotConfig:
             )
             self.joints[joint.name] = joint
             if joint.parent is None:
-                self.root = joint
+                roots.append(joint)
 
-        if self.root is None:
-            raise ValueError("RobotConfig requires exactly one root joint (parent=null)")
+        for joint in self.joints.values():
+            if joint.parent is not None and joint.parent not in self.joints:
+                raise ValueError(
+                    f"Joint '{joint.name}' references unknown parent '{joint.parent}'."
+                )
+
+        if len(roots) != 1:
+            raise ValueError(
+                f"RobotConfig requires exactly one root joint (parent=null); found {len(roots)}: "
+                f"{[j.name for j in roots]}"
+            )
+        self.root = roots[0]
 
     def children(self, name: str) -> list[Joint]:
         return [j for j in self.joints.values() if j.parent == name]
