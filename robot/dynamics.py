@@ -11,6 +11,14 @@ World transforms and world positions are obtained from M1's
 `robot.kinematics.forward_kinematics` / `world_position` so this module
 never re-derives rotations independently of M1 -- it only reads the
 resulting transform matrices.
+
+TODO(M3 UI): `compute_joint_torques`'s `payload_mass_g` lets a caller add an
+extra point mass at an end effector (head assembly, gripper payload, etc.)
+beyond what the printed-link mass estimate captures. It defaults to no
+payload for every end effector, which is why out-of-the-box torque margins
+are optimistic (e.g. "head" currently only carries its ~74 g neck stub, not
+a real head/face assembly). Wire this up to a per-end-effector UI slider
+once Milestone 3's app exists, so users can explore that margin directly.
 """
 
 from __future__ import annotations
@@ -65,6 +73,7 @@ def compute_joint_torques(
     config: RobotConfig,
     joint_angles_deg: dict[str, float],
     link_masses_g: dict[str, float],
+    payload_mass_g: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Static gravitational torque (N*m) about each joint's own rotation axis.
 
@@ -94,14 +103,23 @@ def compute_joint_torques(
     of D) -- e.g. the elbow motor's weight loads the shoulder. A motor at
     its own joint contributes zero torque to that same joint (zero moment
     arm), so including D == Q is harmless.
+
+    Payload (optional): `payload_mass_g` maps an end-effector name (e.g.
+    "head", "hand_l", "hand_r") to an extra point mass in grams, placed at
+    that end effector's own world position (not the link midpoint) --
+    approximating a head assembly, gripper, or held object not otherwise
+    captured by the printed-link mass estimate. Governed by the same
+    ancestor rule as that end effector's link. Defaults to no payload for
+    every end effector.
     """
+    payload_mass_g = payload_mass_g or {}
     transforms = forward_kinematics(config, joint_angles_deg)
     base_transform = _base_transform(config)
 
     def joint_world_pos(name: str) -> np.ndarray:
         return world_position(transforms[name])
 
-    # (anchor_joint_name, midpoint_world_mm, mass_kg) for every link.
+    # (anchor_joint_name, point_world_mm, mass_kg) for every link and payload.
     link_loads: list[tuple[str, np.ndarray, float]] = []
     for joint in config.joints.values():
         parent_pos = (
@@ -116,6 +134,10 @@ def compute_joint_torques(
             ee_pos = joint_world_pos(joint.end_effector_name)
             ee_mass_kg = link_masses_g.get(f"{joint.end_effector_name}_link", 0.0) / 1000.0
             link_loads.append((joint.name, (this_pos + ee_pos) / 2.0, ee_mass_kg))
+
+            payload_kg = payload_mass_g.get(joint.end_effector_name, 0.0) / 1000.0
+            if payload_kg:
+                link_loads.append((joint.name, ee_pos, payload_kg))
 
     # (owning_joint_name, motor_world_mm, mass_kg) for every motor+gearbox.
     motor_loads: list[tuple[str, np.ndarray, float]] = []
