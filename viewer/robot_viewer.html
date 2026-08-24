@@ -1203,18 +1203,15 @@ function buildJointAccordion(j) {
     maxInput.step = "1";
     maxInput.value = String(j.range_deg[1]);
 
-    function applyRange() {
+    // Live update while typing: only act once the currently-typed text
+    // already parses to a valid range. An intermediate state like "-" or
+    // "-4" (a legitimate stepping-stone toward a negative number) simply
+    // does nothing yet -- crucially, it must never overwrite .value, or
+    // it would stomp the user's in-progress keystrokes/cursor position.
+    function applyRangeLive() {
       const lo = parseFloat(minInput.value);
       const hi = parseFloat(maxInput.value);
       if (!isFinite(lo) || !isFinite(hi) || lo >= hi) {
-        // Reject: revert both fields to the last-known-valid range_deg
-        // (rather than leaving the rejected value sitting in the field,
-        // which would look desynced from the actual applied state) and
-        // flash an error style so the rejection is visibly acknowledged.
-        minInput.value = String(j.range_deg[0]);
-        maxInput.value = String(j.range_deg[1]);
-        flashInvalid(minInput);
-        flashInvalid(maxInput);
         return;
       }
       j.range_deg = [lo, hi];
@@ -1234,8 +1231,25 @@ function buildJointAccordion(j) {
       }
       render();
     }
-    minInput.addEventListener("input", applyRange);
-    maxInput.addEventListener("input", applyRange);
+    // Once the user is done editing (blur/change), reject anything that
+    // still isn't a valid range: revert both fields to the last-known-
+    // valid range_deg (rather than leaving the rejected value sitting in
+    // the field, which would look desynced from the actual applied state)
+    // and flash an error style so the rejection is visibly acknowledged.
+    function revertRangeIfInvalid() {
+      const lo = parseFloat(minInput.value);
+      const hi = parseFloat(maxInput.value);
+      if (!isFinite(lo) || !isFinite(hi) || lo >= hi) {
+        minInput.value = String(j.range_deg[0]);
+        maxInput.value = String(j.range_deg[1]);
+        flashInvalid(minInput);
+        flashInvalid(maxInput);
+      }
+    }
+    minInput.addEventListener("input", applyRangeLive);
+    maxInput.addEventListener("input", applyRangeLive);
+    minInput.addEventListener("blur", revertRangeIfInvalid);
+    maxInput.addEventListener("blur", revertRangeIfInvalid);
     pair.appendChild(minInput);
     pair.appendChild(document.createTextNode("〜"));
     pair.appendChild(maxInput);
