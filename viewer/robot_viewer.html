@@ -2427,6 +2427,14 @@ const motionHintEl = document.getElementById("motion-hint");
 // capture time.
 const customNextTimeField = makeValidatedNumberInput(0, 0, 600, () => {});
 customNextTimeField.input.className = "custom-kf-time-input";
+// Override the shared helper's default step="1": most other validated
+// fields (mount rotation degrees, mm thicknesses) are naturally whole-
+// number, but the presets already use tenth-of-a-second keyframe times
+// (0.25s, 0.6s, ...), so the native spinner arrows should move in 0.1s
+// increments here. Typed values were never restricted by `step` anyway
+// (only the spinner arrows and native :invalid styling are), so this is
+// a pure usability nicety, not a behavior change.
+customNextTimeField.input.step = "0.1";
 customNextTimeSlot.appendChild(customNextTimeField.input);
 
 function showCustomKfMessage(text) {
@@ -2498,19 +2506,46 @@ function renderCustomKeyframeList() {
       row.appendChild(indexEl);
 
       const timeField = makeValidatedNumberInput(kf.time_s, 0, 600, (v) => {
+        // Same ~0.01s-duplicate rule enforced on capture and import,
+        // applied here too: editing a row's time to collide with a
+        // DIFFERENT keyframe (identity-compared via `other !== kf`, so
+        // typing this row's own unchanged time back is never flagged)
+        // is rejected with the same message rather than silently
+        // producing two keyframes at the same time_s.
+        const dup = SAMPLE_MOTIONS.custom.keyframes.some((other) => other !== kf && Math.abs(other.time_s - v) < 0.01);
+        if (dup) {
+          showCustomKfMessage("同じ時刻(" + v.toFixed(2) + "s)の別のキーフレームがすでにあります。");
+          return;
+        }
+        clearCustomKfMessage();
         kf.time_s = v;
         invalidateCustomMotionCache();
         refreshCustomExportArea();
       });
       timeField.input.className = "custom-kf-time-input";
+      timeField.input.step = "0.1"; // see the customNextTimeField step comment above
       // Re-sort/rebuild the list only once editing is DONE (blur), not on
       // every live keystroke -- rebuilding this row's own DOM mid-typing
       // (as a full re-render would) would rip focus/cursor away from the
       // very input the user is typing into. Live keystrokes still update
       // the underlying data + export text above; only the on-screen
       // order/index labels wait for blur.
+      //
+      // The rebuild itself is deferred one tick (setTimeout, not called
+      // synchronously from the blur handler): blur fires SYNCHRONOUSLY as
+      // part of a mousedown that moves focus elsewhere -- e.g. mousedown
+      // on a DIFFERENT row's delete button first blurs this field, and
+      // only afterward does that button's own click event fire. Calling
+      // renderCustomKeyframeList() synchronously here would blow away
+      // customKfListEl's children (including that delete button) before
+      // its click ever arrives, silently swallowing the first click. This
+      // matters here specifically because -- unlike every OTHER validated
+      // input in this file -- this one's own blur handler tears down and
+      // rebuilds a whole LIST of sibling controls, not just itself.
+      // Deferring lets mousedown -> blur -> mouseup -> click all finish
+      // against the still-live DOM before the rebuild runs.
       timeField.input.addEventListener("blur", () => {
-        renderCustomKeyframeList();
+        setTimeout(renderCustomKeyframeList, 0);
       });
       row.appendChild(timeField.input);
 
@@ -2542,12 +2577,18 @@ function renderCustomKeyframeList() {
   updateMotionButtons();
 }
 
-// Shared post-mutation hook for delete/clear/import (capture calls
-// renderCustomKeyframeList + its own follow-ups directly): re-renders,
-// and gracefully stops playback if the custom motion was actively
-// playing/paused and just dropped below the 2-keyframe minimum.
+// Shared post-mutation hook for EVERY custom-keyframes mutation (capture/
+// delete/clear/import): re-renders, refreshes the "next keyframe time"
+// field's default to match the new last-keyframe-time + 1s (0s if now
+// empty -- nextDefaultKeyframeTime() already handles that case), and
+// gracefully stops playback if the custom motion was actively playing/
+// paused and just dropped below the 2-keyframe minimum. Centralizing the
+// next-time refresh here (rather than after each caller's own mutation)
+// means it can never go stale on any path, including delete -- which
+// previously left it showing a default computed before the deletion.
 function onCustomKeyframesChanged() {
   renderCustomKeyframeList();
+  customNextTimeField.setExternally(nextDefaultKeyframeTime());
   if (
     activeMotionKey === "custom" &&
     SAMPLE_MOTIONS.custom.keyframes.length < 2 &&
@@ -2574,7 +2615,6 @@ customAddKfBtn.addEventListener("click", () => {
   invalidateCustomMotionCache();
   clearCustomKfMessage();
   onCustomKeyframesChanged();
-  customNextTimeField.setExternally(nextDefaultKeyframeTime());
 });
 
 customClearBtn.addEventListener("click", () => {
@@ -2583,7 +2623,6 @@ customClearBtn.addEventListener("click", () => {
   invalidateCustomMotionCache();
   clearCustomKfMessage();
   onCustomKeyframesChanged();
-  customNextTimeField.setExternally(0);
 });
 
 // Validates a pasted-JSON candidate for the custom motion, returning
@@ -2662,7 +2701,6 @@ customImportBtn.addEventListener("click", () => {
   invalidateCustomMotionCache();
   clearCustomKfMessage();
   onCustomKeyframesChanged();
-  customNextTimeField.setExternally(nextDefaultKeyframeTime());
   showCustomImportMessage(result.keyframes.length + "個のキーフレームを読み込みました。", false);
 });
 
