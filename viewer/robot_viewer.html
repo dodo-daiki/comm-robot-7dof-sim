@@ -511,6 +511,29 @@
     box-sizing: border-box;
   }
 
+  /* ---- 骨格パーツ (M6 skeleton parts panel) ---- */
+  .part-info-row {
+    font-size: 11px;
+    color: #777;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+  .part-readonly-value {
+    font-variant-numeric: tabular-nums;
+    color: #444;
+  }
+  /* Brief highlight when a part's panel entry is scrolled-to/focused
+     after clicking its mesh in the 3D view (Section 6) -- fades out on
+     its own; cleared early if a DIFFERENT part is clicked before it
+     finishes (see focusPartEntry/focusJointEntry). */
+  @keyframes part-focus-flash {
+    0% { background: #f5e6b8; }
+    100% { background: transparent; }
+  }
+  .part-focus-flash {
+    animation: part-focus-flash 1.6s ease-out;
+  }
+
   #reset-btn {
     width: 100%;
     margin-top: 12px;
@@ -580,22 +603,15 @@
   </details>
 
   <h2 class="section-heading">トルク・負荷</h2>
-  <p class="subtitle">現在のポーズで各関節モーターにかかる推定重力トルクです。緑=定格の70%未満、黄=定格に接近、赤=定格超過、濃赤=ストール超過(そのポーズを保持不可)。リンク長・太さ・モーター・取付角度・ポーズを変えるたびに再計算されます。</p>
+  <p class="subtitle">現在のポーズで各関節モーターにかかる推定重力トルクです。緑=定格の70%未満、黄=定格に接近、赤=定格超過、濃赤=ストール超過(そのポーズを保持不可)。「骨格パーツ」の寸法・重量や「関節」のモーター・ポーズを変えるたびに再計算されます。ペイロード(持ち物)は「骨格パーツ」の頭部/手の各項目にあります。</p>
   <div id="torque-summary-row" class="torque-summary-row"></div>
-  <div class="torque-payload-row">
-    <span class="field-label">頭部ペイロード (g)</span>
-    <span id="payload-head-slot"></span>
-  </div>
-  <div class="torque-payload-row">
-    <span class="field-label">左手ペイロード (g)</span>
-    <span id="payload-hand-l-slot"></span>
-  </div>
-  <div class="torque-payload-row">
-    <span class="field-label">右手ペイロード (g)</span>
-    <span id="payload-hand-r-slot"></span>
-  </div>
+
+  <h2 class="section-heading">骨格パーツ</h2>
+  <p class="subtitle">3Dモデルの各パーツをクリックすると、対応する項目にジャンプします。パーツごとに寸法・重量・取付角度を編集できます。</p>
+  <div id="skeleton-parts"></div>
 
   <h2 class="section-heading">関節</h2>
+  <p class="subtitle">回転軸・可動域・モーター機種などの関節そのものの設定です。リンクの長さ・太さ・重量・取付角度は上の「骨格パーツ」に移動しました。</p>
   <div id="joint-sliders"></div>
   <button id="reset-btn" type="button">デフォルトに戻す</button>
 </div>
@@ -1091,6 +1107,41 @@ function estimateAllLinkMasses(jointsList) {
   return masses;
 }
 
+// Applies M6's per-part weight overrides on top of the pure geometric
+// estimate above (which stays byte-for-byte UNCHANGED -- still the exact
+// Python-verified formula, never itself touched). `overridesG` maps the
+// SAME keys estimateAllLinkMasses already produces (a joint's own name
+// for its main link, "<end_effector_name>_link" for its end-effector
+// link) to either a number (used in place of the geometric estimate) or
+// null/absent (geometric estimate used, unchanged from before M6).
+// `handOwnMassG` is an ADDITIONAL, purely ADDITIVE mass layered on top of
+// whatever hand_l_link/hand_r_link resolves to (override or geometric):
+// the 「骨格パーツ」panel's 前腕 (forearm) and 手 (hand) entries are
+// visually distinct parts that happen to share this ONE mass slot in the
+// underlying data model (there's no separate "hand" entry in
+// link_masses_g -- both map to the elbow joint's own end-effector link),
+// so 手's own-weight field adds to it rather than replacing it -- see
+// buildSkeletonPartsPanel (Section 7E) for the full part-to-data mapping
+// and the reasoning behind this split.
+//
+// Deliberately does NOT touch computeJointTorques (still just a plain
+// linkMassesG dict as far as that function is concerned, unaware
+// overrides exist at all) -- for any part with no override set (and
+// handOwnMassG left at its 0 default), every torque number stays
+// bit-for-bit identical to pre-M6.
+function assembleLinkMassesWithOverrides(jointsList, overridesG, handOwnMassG) {
+  const masses = estimateAllLinkMasses(jointsList);
+  for (const key of Object.keys(masses)) {
+    const override = overridesG ? overridesG[key] : null;
+    if (override !== undefined && override !== null) masses[key] = override;
+  }
+  if (handOwnMassG) {
+    if (masses.hand_l_link !== undefined) masses.hand_l_link += handOwnMassG.hand_l || 0;
+    if (masses.hand_r_link !== undefined) masses.hand_r_link += handOwnMassG.hand_r || 0;
+  }
+  return masses;
+}
+
 const GRAVITY_M_S2 = 9.81; // mirrors dynamics.py::GRAVITY_M_S2
 
 function vecCross3(a, b) {
@@ -1488,16 +1539,40 @@ pedestalCap.castShadow = true;
 scene.add(pedestalCap);
 
 // ---- helpers ----
-function makePlaceholderCapsule(radiusMm, material) {
-  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radiusMm, 10, 6, 12), material);
+// `partKey` is tagged into mesh.userData.partKey (or, for the motor
+// cylinders below, .jointKey) at CREATION time here so the M6 click-to-
+// select raycaster (Section 6) can resolve a hit mesh back to its entry
+// in the 「骨格パーツ」/「関節」panels. Every rebuild* function below only
+// ever replaces a mesh's .geometry (never the mesh object itself), so
+// userData set once here survives every subsequent rebuild automatically
+// -- but render() (Section 5) ALSO re-affirms it defensively on every
+// frame for the meshes it touches, so this stays correct even if a
+// future change ever did recreate a mesh mid-session.
+//
+// materialTemplate is CLONED (not shared) per mesh: several meshes here
+// share one THREE.MeshStandardMaterial instance (mannequinMat in
+// particular) purely as a memory/setup optimization, but the click-to-
+// select highlight (Section 6) mutates a hit mesh's OWN emissive color
+// temporarily -- mutating a shared material would incorrectly light up
+// every mesh using it at once. Cloning costs nothing meaningful at this
+// mesh count and keeps every mesh's highlight fully independent.
+function makePlaceholderCapsule(radiusMm, materialTemplate, partKey) {
+  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radiusMm, 10, 6, 12), materialTemplate.clone());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  if (partKey) mesh.userData.partKey = partKey;
   return mesh;
 }
 
 function rebuildCapsule(mesh, lengthMm, radiusMm) {
   const cylLength = Math.max(lengthMm - 2 * radiusMm, 1);
   const newGeo = new THREE.CapsuleGeometry(radiusMm, cylLength, 6, 12);
+  mesh.geometry.dispose();
+  mesh.geometry = newGeo;
+}
+
+function rebuildSphere(mesh, radiusMm) {
+  const newGeo = new THREE.SphereGeometry(radiusMm, 24, 18);
   mesh.geometry.dispose();
   mesh.geometry = newGeo;
 }
@@ -1539,12 +1614,18 @@ function orientBetween(mesh, pA3, pB3) {
 
 // ---- torso (static visual connector, NOT a kinematic joint) ----
 const torsoRadius = 95;
-const torso = makePlaceholderCapsule(torsoRadius, mannequinMat);
+const torso = makePlaceholderCapsule(torsoRadius, mannequinMat, "torso");
 scene.add(torso);
 
 // ---- clavicle (static visual connector, NOT a kinematic joint) ----
+// CLAVICLE_THICKNESS_MM (M6): a genuinely independent diameter, no longer
+// blended from the two shoulder joints' own link_thickness_mm (see the
+// render() comment where it's consumed, and the 「骨格パーツ」/鎖骨 entry
+// in buildSkeletonPartsPanel, Section 7E). clavicleRadius below remains
+// only this mesh's INITIAL placeholder size before the first render().
 const clavicleRadius = 44;
-const clavicle = makePlaceholderCapsule(clavicleRadius, mannequinMat);
+let CLAVICLE_THICKNESS_MM = 88; // diameter, mm -- matches the pre-M6 blended default (both shoulders started at 88 too)
+const clavicle = makePlaceholderCapsule(clavicleRadius, mannequinMat, "clavicle");
 scene.add(clavicle);
 
 // ---- limbs: chunky, toy-proportioned (thick radius relative to length) ----
@@ -1560,33 +1641,42 @@ const limbRadiusUpperArm = 50;
 const limbRadiusForearm = 42;
 const limbRadiusNeck = 24;
 
-const upperArmL = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat);
-const forearmL = makePlaceholderCapsule(limbRadiusForearm, mannequinMat);
-const upperArmR = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat);
-const forearmR = makePlaceholderCapsule(limbRadiusForearm, mannequinMat);
-const neckLower = makePlaceholderCapsule(limbRadiusNeck, mannequinMat);
-const neckUpper = makePlaceholderCapsule(limbRadiusNeck * 0.9, mannequinMat);
+const upperArmL = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat, "upper_arm_l");
+const forearmL = makePlaceholderCapsule(limbRadiusForearm, mannequinMat, "forearm_l");
+const upperArmR = makePlaceholderCapsule(limbRadiusUpperArm, mannequinMat, "upper_arm_r");
+const forearmR = makePlaceholderCapsule(limbRadiusForearm, mannequinMat, "forearm_r");
+const neckLower = makePlaceholderCapsule(limbRadiusNeck, mannequinMat, "neck");
+const neckUpper = makePlaceholderCapsule(limbRadiusNeck * 0.9, mannequinMat, "head_mount");
 scene.add(upperArmL, forearmL, upperArmR, forearmR, neckLower, neckUpper);
 
 // ---- motor cylinders: one real-scale actuator per joint (Section C) ----
 // These ARE the joint markers -- no separate ball-joint sphere on top, for
 // a cleaner "this is a real actuator" look now that a real cylinder sized
-// from MOTOR_SPECS sits at every joint.
+// from MOTOR_SPECS sits at every joint. Tagged with .jointKey (not
+// .partKey): a motor click should focus the 「関節」panel entry for that
+// joint, not a skeleton-part entry.
 const motorMeshes = {};
 for (const j of JOINTS) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 10, 24), motorMat);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 10, 24), motorMat.clone());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.userData.jointKey = j.name;
   scene.add(mesh);
   motorMeshes[j.name] = mesh;
 }
 
 // ---- hands (chunky rounded mitten blobs at the wrist end effectors) ----
+// HAND_RADIUS_MM (M6): independently editable per side (was one shared
+// hardcoded constant); handRadius below remains only the initial
+// placeholder size before the first render().
 const handRadius = 46;
-const handL = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat);
-const handR = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat);
+let HAND_RADIUS_MM = { l: 46, r: 46 };
+const handL = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat.clone());
+const handR = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat.clone());
 handL.castShadow = true;
 handR.castShadow = true;
+handL.userData.partKey = "hand_l";
+handR.userData.partKey = "hand_r";
 scene.add(handL, handR);
 
 // ---- head: oversized chibi proportion, plain solid color, no face ----
@@ -1605,10 +1695,15 @@ scene.add(handL, handR);
 // overlapped the torso capsule by over 100mm and fully swallowed both
 // neck motors, which was the direct cause of neck_yaw's rotation being
 // completely invisible -- see the limbRadiusNeck comment above).
+// HEAD_RADIUS_MM (M6): now genuinely user-editable (was a hardcoded
+// constant never exposed anywhere) via the 「骨格パーツ」/頭部 entry.
+// headRadius below remains only this mesh's initial placeholder size.
 const headRadius = 105;
-const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 32, 24), headMat);
+let HEAD_RADIUS_MM = 105;
+const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 32, 24), headMat.clone());
 head.castShadow = true;
 head.receiveShadow = true;
+head.userData.partKey = "head";
 scene.add(head);
 
 /* =====================================================================
@@ -1630,13 +1725,12 @@ function render() {
   // (a DIAMETER; /2 for radius) instead of the fixed torsoRadius/
   // clavicleRadius/limbRadius* constants (Section 4) those fields
   // defaulted from -- those constants remain only as this mesh's initial
-  // placeholder size before the very first render() call. The clavicle
-  // capsule is shared between BOTH shoulder joints (it spans shoulder_l
-  // <-> shoulder_r), so its radius blends both joints' link_thickness_mm,
-  // the same way its LENGTH already blends both origin_offset_mm's.
-  const clavicleDiameterMm =
-    (JOINTS_BY_NAME.shoulder_pitch_l.link_thickness_mm + JOINTS_BY_NAME.shoulder_pitch_r.link_thickness_mm) / 2;
-
+  // placeholder size before the very first render() call. The clavicle's
+  // own diameter (M6) is CLAVICLE_THICKNESS_MM, a genuinely independent
+  // value (no longer blended from the two shoulder joints' own
+  // link_thickness_mm, which now solely govern each shoulder's OWN
+  // separate mass entry -- see 「骨格パーツ」/鎖骨 in
+  // buildSkeletonPartsPanel, Section 7E).
   rebuildCapsule(torso, LINK_LENGTHS_MM.torso, JOINTS_BY_NAME.neck_yaw.link_thickness_mm / 2);
   // clavicle's capsule is rebuilt further down, once pShoulderL/pShoulderR
   // (real FK world positions) are available -- see the computeLinkLengths()
@@ -1654,6 +1748,9 @@ function render() {
   // cheap (plain textContent updates on a handful of spans) and keeps
   // them from going stale after a length edit without extra wiring.
   updateThicknessHints();
+  // Same live-refresh treatment for the M6 skeleton-parts panel's
+  // per-part weight-override hints (Section 7E).
+  updateWeightHints();
 
   for (const j of JOINTS) {
     rebuildMotorCylinder(motorMeshes[j.name], MOTOR_SPECS[j.motor]);
@@ -1682,8 +1779,11 @@ function render() {
   // computeLinkLengths() comment) so a mount rotation on either shoulder
   // can't pull it into a visible gap/overhang: this stays the true
   // straight-line distance between where the shoulders really ended up.
-  rebuildCapsule(clavicle, pShoulderL.distanceTo(pShoulderR), clavicleDiameterMm / 2);
+  rebuildCapsule(clavicle, pShoulderL.distanceTo(pShoulderR), CLAVICLE_THICKNESS_MM / 2);
   orientBetween(clavicle, pShoulderL, pShoulderR);
+  if (partReadonlyEls.clavicle_length) {
+    partReadonlyEls.clavicle_length.textContent = "鎖骨の全長 (実測, 読み取り専用): 約" + Math.round(pShoulderL.distanceTo(pShoulderR)) + "mm";
+  }
 
   // limbs
   orientBetween(upperArmL, pShoulderL, pElbowL);
@@ -1713,13 +1813,41 @@ function render() {
     orientAlongDirection(motorMeshes[j.name], jointPosThree, axisThree);
   }
 
-  // hands
+  // hands: size (M6) is now independently editable per side via
+  // HAND_RADIUS_MM.l/.r (「骨格パーツ」/手 entries), rebuilt every frame
+  // like every other geometry above.
+  rebuildSphere(handL, HAND_RADIUS_MM.l);
+  rebuildSphere(handR, HAND_RADIUS_MM.r);
   handL.position.copy(pHandL);
   handR.position.copy(pHandR);
 
-  // head: same exact FK "head" end-effector point as before -- just a much
-  // bigger decorative sphere rendered there (see Section 4 comment).
+  // head: same exact FK "head" end-effector point as before, but now (M6)
+  // a genuinely editable size (HEAD_RADIUS_MM, 「骨格パーツ」/頭部) rather
+  // than the old fixed constant -- see the Section 4 comment for the
+  // "decorative sphere at a real kinematic point" framing, which still
+  // holds; only the radius source changed.
+  rebuildSphere(head, HEAD_RADIUS_MM);
   head.position.copy(pHead);
+
+  // Defensive re-affirmation of click-to-select tags (M6, Section 6):
+  // every rebuild* call above only ever replaces .geometry, never the
+  // mesh object, so userData set once at creation (Section 4) already
+  // survives all of this -- but re-asserting it here too is cheap
+  // insurance against that invariant ever quietly breaking in a future
+  // change, per the M6 brief's explicit caution about tagging surviving
+  // geometry rebuilds.
+  torso.userData.partKey = "torso";
+  clavicle.userData.partKey = "clavicle";
+  upperArmL.userData.partKey = "upper_arm_l";
+  forearmL.userData.partKey = "forearm_l";
+  upperArmR.userData.partKey = "upper_arm_r";
+  forearmR.userData.partKey = "forearm_r";
+  neckLower.userData.partKey = "neck";
+  neckUpper.userData.partKey = "head_mount";
+  handL.userData.partKey = "hand_l";
+  handR.userData.partKey = "hand_r";
+  head.userData.partKey = "head";
+  for (const j of JOINTS) motorMeshes[j.name].userData.jointKey = j.name;
 
   // torque/payload dashboard (M5, Section 7D) -- recomputed on every
   // render() call, same as everything else above, so it stays live
@@ -1761,10 +1889,22 @@ let lastPointerY = 0;
 const ROTATE_SPEED = 0.008;
 const ZOOM_SPEED = 0.0016;
 
+// M6 click-to-select: the ORIGINAL pointerdown position, kept separate
+// from lastPointerX/Y above (which pointermove continuously overwrites
+// for its own per-frame delta) so pointerup can measure TOTAL movement
+// since the gesture began -- a drag beyond CLICK_DRAG_THRESHOLD_PX must
+// keep behaving exactly as pure camera orbit always has (no selection);
+// only a genuine click (negligible movement) triggers raycasting.
+let pointerDownX = 0;
+let pointerDownY = 0;
+const CLICK_DRAG_THRESHOLD_PX = 6;
+
 renderer.domElement.addEventListener("pointerdown", (e) => {
   isDragging = true;
   lastPointerX = e.clientX;
   lastPointerY = e.clientY;
+  pointerDownX = e.clientX;
+  pointerDownY = e.clientY;
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 
@@ -1783,6 +1923,10 @@ renderer.domElement.addEventListener("pointermove", (e) => {
 renderer.domElement.addEventListener("pointerup", (e) => {
   isDragging = false;
   try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const movedPx = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
+  if (movedPx <= CLICK_DRAG_THRESHOLD_PX) {
+    handleSceneClick(e.clientX, e.clientY);
+  }
 });
 renderer.domElement.addEventListener("pointerleave", () => { isDragging = false; });
 
@@ -1791,6 +1935,88 @@ renderer.domElement.addEventListener("wheel", (e) => {
   camRadius *= 1 + e.deltaY * ZOOM_SPEED;
   camRadius = Math.max(CAM_MIN_RADIUS, Math.min(CAM_MAX_RADIUS, camRadius));
 }, { passive: false });
+
+/* =====================================================================
+ * SECTION 6B: CLICK-TO-SELECT ON THE 3D MODEL (M6)
+ * ---------------------------------------------------------------------
+ * Clicking any rendered part/motor mesh (a genuine click, per the
+ * CLICK_DRAG_THRESHOLD_PX check on pointerup above -- a drag past that
+ * threshold is left to behave exactly as pure camera orbit always has)
+ * raycasts against every selectable mesh, briefly highlights whichever
+ * one was hit, and scrolls to + expands + flashes its entry in the
+ * appropriate panel: a body-segment mesh (tagged .userData.partKey at
+ * creation time, Section 4) -> its 「骨格パーツ」entry; a motor cylinder
+ * (tagged .userData.jointKey) -> its 「関節」entry.
+ * ===================================================================== */
+
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+
+// Recomputed on every click (not cached) since motorMeshes/etc. never
+// change identity but this list is cheap enough that freshness beats a
+// negligible allocation.
+function selectableMeshes() {
+  const meshes = [torso, clavicle, upperArmL, forearmL, upperArmR, forearmR, neckLower, neckUpper, handL, handR, head];
+  for (const j of JOINTS) meshes.push(motorMeshes[j.name]);
+  return meshes;
+}
+
+let highlightedMesh = null;
+let highlightTimeoutId = null;
+const HIGHLIGHT_COLOR = 0xffcc55;
+const HIGHLIGHT_INTENSITY = 0.7;
+const HIGHLIGHT_DURATION_MS = 1600;
+
+function clearHighlight() {
+  if (highlightedMesh) {
+    highlightedMesh.material.emissive.setHex(0x000000);
+    highlightedMesh.material.emissiveIntensity = 0;
+    highlightedMesh = null;
+  }
+  if (highlightTimeoutId !== null) {
+    window.clearTimeout(highlightTimeoutId);
+    highlightTimeoutId = null;
+  }
+}
+// Each selectable mesh has its OWN cloned material (Section 4) precisely
+// so this can mutate one mesh's emissive color without lighting up every
+// other mesh sharing what used to be one shared material instance.
+function highlightMesh(mesh) {
+  clearHighlight();
+  mesh.material.emissive.setHex(HIGHLIGHT_COLOR);
+  mesh.material.emissiveIntensity = HIGHLIGHT_INTENSITY;
+  highlightedMesh = mesh;
+  highlightTimeoutId = window.setTimeout(clearHighlight, HIGHLIGHT_DURATION_MS);
+}
+
+// Opens + scrolls to + briefly flashes (part-focus-flash, CSS) a panel
+// entry. Restarts the flash animation even if the same entry was just
+// flashed a moment ago (forced reflow between removing and re-adding the
+// class), so rapid re-clicks of the same part still visibly re-confirm.
+function flashPanelEntry(details) {
+  if (!details) return;
+  details.open = true;
+  details.scrollIntoView({ behavior: "smooth", block: "center" });
+  details.classList.remove("part-focus-flash");
+  void details.offsetWidth; // eslint-disable-line no-unused-expressions -- force reflow
+  details.classList.add("part-focus-flash");
+}
+
+function handleSceneClick(clientX, clientY) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hits = raycaster.intersectObjects(selectableMeshes(), false);
+  if (hits.length === 0) return;
+  const mesh = hits[0].object;
+  highlightMesh(mesh);
+  if (mesh.userData.partKey) {
+    flashPanelEntry(partDetailsEls[mesh.userData.partKey]);
+  } else if (mesh.userData.jointKey) {
+    flashPanelEntry(document.querySelector('details.joint-accordion[data-joint="' + mesh.userData.jointKey + '"]'));
+  }
+}
 
 /* =====================================================================
  * SECTION 7: UI -- per-joint accordion (pose slider + detail controls)
@@ -2004,126 +2230,20 @@ function buildJointAccordion(j) {
     torqueFieldEls[j.name] = { pill, text };
   }
 
-  // link length into this joint (skip waist_yaw: zero offset, no direction)
-  if (ORIGIN_OFFSET_DIRECTIONS[j.name]) {
-    const field = addField("リンク長 (mm)");
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "1";
-    input.max = "2000";
-    input.step = "1";
-    input.value = String(Math.round(vecLen(j.origin_offset_mm)));
-    input.addEventListener("input", () => {
-      const v = parseFloat(input.value);
-      if (!isFinite(v) || v <= 0) return;
-      setLinkLength(j.name, v);
-      render();
-    });
-    field.appendChild(input);
-    lengthInputs[j.name] = input;
-  }
-
-  // link thickness (this joint's incoming link's rendered capsule
-  // diameter; skip waist_yaw same as link length above -- it has no
-  // rendered incoming link to size). Stored/edited as a DIAMETER so the
-  // "recommended thickness" hint's clamp(length*0.15, 20, 60) formula
-  // (M5 brief) needs no unit conversion to display or apply.
-  if (ORIGIN_OFFSET_DIRECTIONS[j.name]) {
-    const field = addField("リンク太さ (直径mm)");
-    const wrap = document.createElement("div");
-    wrap.className = "thickness-control";
-    const thickness = makeValidatedNumberInput(j.link_thickness_mm, 5, 300, (v) => setLinkThickness(j.name, v));
-    thicknessInputs[j.name] = thickness;
-    const hint = document.createElement("button");
-    hint.type = "button";
-    hint.className = "thickness-hint";
-    hint.title = "リンク長から算出した目安値です（構造計算ではありません）。クリックで適用。";
-    hint.addEventListener("click", () => {
-      const rec = parseFloat(hint.dataset.recommended);
-      if (!isFinite(rec)) return;
-      thickness.setExternally(rec);
-      setLinkThickness(j.name, rec);
-      render();
-    });
-    thicknessHintEls[j.name] = hint;
-    wrap.appendChild(thickness.input);
-    wrap.appendChild(hint);
-    field.appendChild(wrap);
-  }
-
-  // end-effector link length (leaf joints only: neck_pitch, elbow_pitch_l/r)
-  if (j.end_effector_name) {
-    const field = addField("先端リンク長 (mm)");
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "1";
-    input.max = "2000";
-    input.step = "1";
-    input.value = String(Math.round(vecLen(j.end_effector_offset_mm)));
-    input.addEventListener("input", () => {
-      const v = parseFloat(input.value);
-      if (!isFinite(v) || v <= 0) return;
-      setEndEffectorLength(j.name, v);
-      render();
-    });
-    field.appendChild(input);
-    eeLengthInputs[j.name] = input;
-  }
-
-  // end-effector link thickness (leaf joints only), mirroring the main
-  // link thickness control above.
-  if (j.end_effector_name) {
-    const field = addField("先端リンク太さ (直径mm)");
-    const wrap = document.createElement("div");
-    wrap.className = "thickness-control";
-    const eeThickness = makeValidatedNumberInput(j.end_effector_thickness_mm, 5, 300, (v) => setEndEffectorThickness(j.name, v));
-    eeThicknessInputs[j.name] = eeThickness;
-    const hint = document.createElement("button");
-    hint.type = "button";
-    hint.className = "thickness-hint";
-    hint.title = "リンク長から算出した目安値です（構造計算ではありません）。クリックで適用。";
-    hint.addEventListener("click", () => {
-      const rec = parseFloat(hint.dataset.recommended);
-      if (!isFinite(rec)) return;
-      eeThickness.setExternally(rec);
-      setEndEffectorThickness(j.name, rec);
-      render();
-    });
-    eeThicknessHintEls[j.name] = hint;
-    wrap.appendChild(eeThickness.input);
-    wrap.appendChild(hint);
-    field.appendChild(wrap);
-  }
-
-  // mount rotation X/Y/Z (取付角度): tilts this joint's mount. Its
-  // rotation axis follows the tilt (see mountRotationMatrix4 /
-  // jointTransform, Section 2), and -- for every joint except waist_yaw,
-  // whose origin offset is zero -- its incoming link direction follows
-  // too. Shown for all 7 joints, including waist_yaw, since the axis
-  // still tilts for it even with no link to reorient.
-  {
-    const field = addField("取付角度 (deg)");
-    const pair = document.createElement("div");
-    pair.className = "range-pair";
-    const axisFields = [
-      ["X", "mount_rx_deg", "rx"],
-      ["Y", "mount_ry_deg", "ry"],
-      ["Z", "mount_rz_deg", "rz"],
-    ];
-    const entry = {};
-    for (const [label, key, entryKey] of axisFields) {
-      const tag = document.createElement("span");
-      tag.className = "axis-tag";
-      tag.textContent = label;
-      pair.appendChild(tag);
-      const created = makeValidatedNumberInput(j[key], -180, 180, (v) => { j[key] = v; });
-      created.input.className = "narrow";
-      pair.appendChild(created.input);
-      entry[entryKey] = created;
-    }
-    mountInputs[j.name] = entry;
-    field.appendChild(pair);
-  }
+  // NOTE (M6 skeleton-parts rework): link length/thickness and mount
+  // angle used to live here, per joint. They've moved to the NEW
+  // 「骨格パーツ」(Skeleton Parts) panel (buildSkeletonPartsPanel,
+  // Section 7E), organized by physical body segment instead of by
+  // whichever joint happens to own that segment's data -- see that
+  // section's header comment for the full part list and the reasoning
+  // behind where each joint's mount_r{x,y,z}_deg control ended up. This
+  // accordion keeps only the genuinely kinematic/pivot properties: pose
+  // (above, in <summary>), rotation range, motor model, and rotation
+  // axis. lengthInputs/eeLengthInputs/thicknessInputs/eeThicknessInputs/
+  // mountInputs/thicknessHintEls/eeThicknessHintEls are now populated by
+  // buildSkeletonPartsPanel instead of here, but keep the EXACT SAME
+  // keys (by joint name) so the reset-to-defaults handler's existing
+  // loop over them needs no changes.
 
   // rotation range min/max
   {
@@ -2722,6 +2842,25 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   payloadInputs.head.setExternally(0);
   payloadInputs.hand_l.setExternally(0);
   payloadInputs.hand_r.setExternally(0);
+  // M6 skeleton-parts additions: per-part weight overrides all clear
+  // back to auto (same "design parameter, resets with everything else"
+  // treatment as payload above), and the new size/thickness state
+  // (clavicle diameter, head radius, hand radii, hand-own-mass) returns
+  // to its default.
+  for (const key of Object.keys(PART_WEIGHT_OVERRIDE_G)) delete PART_WEIGHT_OVERRIDE_G[key];
+  for (const comp of Object.values(weightOverrideComponents)) comp.setExternally(null);
+  HAND_OWN_MASS_G.hand_l = 0;
+  HAND_OWN_MASS_G.hand_r = 0;
+  handOwnMassInputs.hand_l.setExternally(0);
+  handOwnMassInputs.hand_r.setExternally(0);
+  CLAVICLE_THICKNESS_MM = 88;
+  clavicleThicknessInput.setExternally(88);
+  HEAD_RADIUS_MM = 105;
+  headSizeInput.setExternally(105);
+  HAND_RADIUS_MM.l = 46;
+  HAND_RADIUS_MM.r = 46;
+  handSizeInputs.l.setExternally(46);
+  handSizeInputs.r.setExternally(46);
   render();
 });
 
@@ -3070,17 +3209,17 @@ renderCustomKeyframeList(); // seed the empty-state placeholder + export text
  * parameter edit (length/thickness/motor/mount/axis), exactly like FK
  * itself already does, with no separate update path to keep in sync.
  *
- * PAYLOAD_MASS_G is treated as a DESIGN PARAMETER, not user-authored
- * content like the custom motion's keyframes: "デフォルトに戻す" resets
- * it to 0/0/0 (see that handler below), same as it resets link length/
- * thickness/motor/mount/axis. Rationale: a payload mass models a design
- * choice ("what if the head assembly weighs 150g"), not an animation the
- * user spent effort authoring -- losing it on reset is the same kind of
- * "start over" a user already expects from that button for every other
- * design knob, whereas losing custom keyframes would discard real work.
+ * PAYLOAD_MASS_G (declared in Section 7E, where its inputs now live
+ * inside the 「骨格パーツ」panel's 頭部/手 entries -- see that section) is
+ * treated as a DESIGN PARAMETER, not user-authored content like the
+ * custom motion's keyframes: "デフォルトに戻す" resets it to 0/0/0 (see
+ * that handler below), same as it resets link length/thickness/motor/
+ * mount/axis. Rationale: a payload mass models a design choice ("what if
+ * the head assembly weighs 150g"), not an animation the user spent
+ * effort authoring -- losing it on reset is the same kind of "start
+ * over" a user already expects from that button for every other design
+ * knob, whereas losing custom keyframes would discard real work.
  * ===================================================================== */
-
-const PAYLOAD_MASS_G = { head: 0, hand_l: 0, hand_r: 0 };
 
 const JOINT_SHORT_LABEL_JA = {
   waist_yaw: "腰Y",
@@ -3112,19 +3251,13 @@ function torqueStatusLabelJa(status) {
   return "余裕あり";
 }
 
+// payloadInputs is populated by buildSkeletonPartsPanel (Section 7E),
+// where the 頭部/手 parts' payload fields now physically live in the DOM
+// -- declared here (not there) only because the reset-to-defaults
+// handler above already references payloadInputs.head/.hand_l/.hand_r,
+// and this keeps that one shared map's identity stable regardless of
+// which section populates it.
 const payloadInputs = {};
-const payloadSlots = {
-  head: document.getElementById("payload-head-slot"),
-  hand_l: document.getElementById("payload-hand-l-slot"),
-  hand_r: document.getElementById("payload-hand-r-slot"),
-};
-for (const eeName of ["head", "hand_l", "hand_r"]) {
-  const field = makeValidatedNumberInput(0, 0, 20000, (v) => {
-    PAYLOAD_MASS_G[eeName] = v;
-  });
-  payloadSlots[eeName].appendChild(field.input);
-  payloadInputs[eeName] = field;
-}
 
 const torqueSummaryRowEl = document.getElementById("torque-summary-row");
 const torqueSummaryPillEls = {};
@@ -3141,13 +3274,15 @@ for (const j of JOINTS) {
   torqueSummaryPillEls[j.name] = { pill, item };
 }
 
-// Recomputes link masses (from each joint's LIVE length/thickness),
-// static gravity torques (from the LIVE pose + mount rotation + axis +
-// motor selection), and torque margins, then paints both the summary
-// row and each accordion's detail field. Called from render() -- see
-// that function's own comment for why that's the single right place.
+// Recomputes link masses (from each joint's LIVE length/thickness, PLUS
+// M6's per-part weight overrides/hand-own-mass -- see
+// assembleLinkMassesWithOverrides, Section 2B), static gravity torques
+// (from the LIVE pose + mount rotation + axis + motor selection), and
+// torque margins, then paints both the summary row and each accordion's
+// detail field. Called from render() -- see that function's own comment
+// for why that's the single right place.
 function updateTorqueDisplay() {
-  const linkMasses = estimateAllLinkMasses(JOINTS);
+  const linkMasses = assembleLinkMassesWithOverrides(JOINTS, PART_WEIGHT_OVERRIDE_G, HAND_OWN_MASS_G);
   const torques = computeJointTorques(JOINTS, BASE_HEIGHT_MM, currentAngles, linkMasses, PAYLOAD_MASS_G);
   const margins = torqueMargin(JOINTS, torques);
 
@@ -3177,12 +3312,470 @@ function updateTorqueDisplay() {
   }
 }
 
-// Deferred here from the end of Section 7C (see the NOTE left there):
-// this is the initial stopMotion() call that seeds the pose/progress/
-// button state for the default-selected motion, now safe to run since
-// every top-level const it transitively touches (through render() ->
-// updateTorqueDisplay()) is finally initialized.
-stopMotion();
+// NOTE: the initial stopMotion() call is deferred further still, to the
+// very end of Section 7E now -- that section adds PAYLOAD_MASS_G (which
+// updateTorqueDisplay above reads) and the rest of the M6 skeleton-parts
+// state, so the same TDZ-ordering reasoning previously documented at the
+// end of Section 7C applies transitively here too.
+
+/* =====================================================================
+ * SECTION 7E: SKELETON PARTS PANEL (M6)
+ * ---------------------------------------------------------------------
+ * Reorganizes link length/thickness/mount-angle -- previously bundled
+ * into the per-JOINT accordion above under whichever motor happened to
+ * own that data (e.g. editing "torso" thickness inside "neck_yaw") --
+ * into a panel organized by physical body PART instead, plus adds a
+ * per-part weight override and, for clavicle/head/hands, dimensions that
+ * were never exposed before at all.
+ *
+ * PART LIST AND DATA MAPPING (verified against computeLinkLengths() and
+ * render() directly, not assumed from anatomy alone -- e.g. "upper arm"
+ * is elbow_pitch_l's own origin_offset_mm, NOT shoulder_pitch_l's; the
+ * shoulder joints' own origin_offset_mm instead feeds the CLAVICLE):
+ *
+ *   胴体   torso        neck_yaw incoming link (origin_offset_mm)
+ *   鎖骨   clavicle     BOTH shoulder joints' origin_offset_mm (length is
+ *                       READ-ONLY/derived from real FK positions, per the
+ *                       eb8b4a2 fix -- never independently settable);
+ *                       thickness is a genuinely independent new value
+ *                       (CLAVICLE_THICKNESS_MM, no longer blended from
+ *                       the two shoulders); "weight" reuses each
+ *                       shoulder's OWN existing link_masses_g entry
+ *                       (keyed by "shoulder_pitch_l"/"shoulder_pitch_r"),
+ *                       shown here as two halves since that's the real
+ *                       anchor point already used by computeJointTorques
+ *                       (waist_yaw, at the waist<->shoulder midpoint) --
+ *                       deliberately NOT a new physics contribution (see
+ *                       "constraints" below); ALSO owns each shoulder
+ *                       joint's own mount_r{x,y,z}_deg (two separate
+ *                       triplets, left/right -- distinct from
+ *                       elbow_pitch_l/r's, which live under 上腕 below)
+ *   首     neck         neck_pitch incoming link (origin_offset_mm)
+ *   頭部支持 head_mount  neck_pitch end-effector link (end_effector_offset_mm)
+ *   頭部   head         the head sphere: HEAD_RADIUS_MM (new) + the
+ *                       EXISTING head payload_mass_g, relabeled here as
+ *                       "頭部の重量" (not a new weight concept)
+ *   上腕L/R upper_arm_l/r  elbow_pitch_l/r incoming link (origin_offset_mm)
+ *   前腕L/R forearm_l/r    elbow_pitch_l/r end-effector link (end_effector_offset_mm) --
+ *                          shape (length/thickness) only; its weight-override
+ *                          slot is presented under 手/hand instead (see below)
+ *   手L/R  hand_l/r     the hand sphere: HAND_RADIUS_MM.l/.r (new) +
+ *                       HAND_OWN_MASS_G (new, ADDITIVE on top of 前腕's
+ *                       hand_l_link/hand_r_link mass -- see
+ *                       assembleLinkMassesWithOverrides, Section 2B, for
+ *                       why additive) + the EXISTING per-hand
+ *                       payload_mass_g, relabeled "ペイロード(持ち物)"
+ *
+ * MOUNT-ANGLE SPLITTING DECISION (neck_pitch, and by the same reasoning
+ * elbow_pitch_l/r): re-reading jointTransform()/forwardKinematics()
+ * (Section 2) directly -- NOT assumed -- shows a joint's SINGLE
+ * mount_r{x,y,z}_deg genuinely affects BOTH its incoming link's direction
+ * (rotated by R_mount alone, composed with the parent's rotation) AND its
+ * end-effector link's direction (rotated by that joint's FULL world
+ * rotation, parent_rotation @ R_mount @ R_axis(angle), since the
+ * end-effector transform is `world(J) @ translate-only`). There is only
+ * ONE mount-rotation degree-of-freedom-set per joint -- it cannot be
+ * meaningfully split into two independent controls. The editable control
+ * is placed on the INCOMING-link part (首/neck for neck_pitch, 上腕/
+ * upper-arm for elbow_pitch_l/r), where R_mount acts alone without being
+ * entangled with the joint's own pose angle; the end-effector-link part
+ * (頭部支持/head-mount, 前腕/forearm) shows a read-only note instead of a
+ * second, fabricated control that doesn't correspond to an independent
+ * value in the actual math.
+ *
+ * CONSTRAINT: per the M6 brief, jointTransform/forwardKinematics/
+ * jointAxisWorld/computeJointTorques internals are NOT touched by this
+ * section -- only how their existing inputs (link_masses_g,
+ * payload_mass_g) are SOURCED/ASSEMBLED changes (assembleLinkMasses
+ * WithOverrides, Section 2B). This is why clavicle's "weight" reuses an
+ * EXISTING link_masses_g anchor (the two shoulders' own entries) rather
+ * than inventing a new one, and why hand's own mass is additive on top
+ * of an existing entry rather than a new anchor point.
+ * ===================================================================== */
+
+const skeletonPartsContainer = document.getElementById("skeleton-parts");
+const partDetailsEls = {}; // { [partKey]: <details> }, for click-to-select scroll/focus (Section 6)
+const PART_WEIGHT_OVERRIDE_G = {}; // { [linkMassesGKey]: grams override }, absent/null = auto (geometric estimate)
+const HAND_OWN_MASS_G = { hand_l: 0, hand_r: 0 }; // additive extra mass at the hand, on top of forearm's own link mass
+const PAYLOAD_MASS_G = { head: 0, hand_l: 0, hand_r: 0 }; // moved here from Section 7D -- inputs now live in the 頭部/手 part entries below
+const weightOverrideComponents = {}; // { [linkMassesGKey]: makeWeightOverrideInput() result }, for reset-to-defaults
+const weightHintUpdaters = []; // [{ comp, autoValueFn }], refreshed every render() (updateWeightHints)
+const handOwnMassInputs = {}; // { hand_l, hand_r }
+let clavicleThicknessInput = null;
+let headSizeInput = null;
+const handSizeInputs = {}; // { l, r }
+const partReadonlyEls = {}; // { clavicle_length: <span> }, live read-only text
+
+function setPartWeightOverride(key, v) {
+  if (v === null || v === undefined) delete PART_WEIGHT_OVERRIDE_G[key];
+  else PART_WEIGHT_OVERRIDE_G[key] = v;
+}
+
+// Builds one part's <details> container, styled identically to the
+// per-joint accordion above (same class names) for visual consistency,
+// and returns an addField()/addInfoRow() pair scoped to its body -- same
+// shape as buildJointAccordion's own local addField(), just factored out
+// since this section builds many more of these than that one did.
+function addPartDetails(partKey, titleJa) {
+  const details = document.createElement("details");
+  details.className = "joint-accordion";
+  details.dataset.part = partKey;
+
+  const summary = document.createElement("summary");
+  const summaryContent = document.createElement("div");
+  summaryContent.className = "summary-content";
+  const summaryRow = document.createElement("div");
+  summaryRow.className = "accordion-summary-row";
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "joint-name";
+  nameSpan.textContent = titleJa;
+  summaryRow.appendChild(nameSpan);
+  summaryContent.appendChild(summaryRow);
+  summary.appendChild(summaryContent);
+  details.appendChild(summary);
+
+  const body = document.createElement("div");
+  body.className = "joint-details";
+  details.appendChild(body);
+
+  skeletonPartsContainer.appendChild(details);
+  partDetailsEls[partKey] = details;
+
+  function addField(labelText) {
+    const field = document.createElement("div");
+    field.className = "detail-field";
+    const label = document.createElement("span");
+    label.className = "field-label";
+    label.textContent = labelText;
+    field.appendChild(label);
+    body.appendChild(field);
+    return field;
+  }
+  function addInfoRow(text) {
+    const row = document.createElement("div");
+    row.className = "part-info-row";
+    row.textContent = text;
+    body.appendChild(row);
+    return row;
+  }
+  return { addField, addInfoRow };
+}
+
+// ---- shared field builders (reused across every part below) ----
+
+function addLengthField(p, jointName, getOffsetFn, setterFn, labelText) {
+  const field = p.addField(labelText || "長さ (mm)");
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.max = "2000";
+  input.step = "1";
+  input.value = String(Math.round(vecLen(getOffsetFn())));
+  input.addEventListener("input", () => {
+    const v = parseFloat(input.value);
+    if (!isFinite(v) || v <= 0) return;
+    setterFn(jointName, v);
+    render();
+  });
+  field.appendChild(input);
+  return input;
+}
+
+function addThicknessField(p, jointName, currentValue, setterFn, labelText) {
+  const field = p.addField(labelText || "太さ (直径mm)");
+  const wrap = document.createElement("div");
+  wrap.className = "thickness-control";
+  const thickness = makeValidatedNumberInput(currentValue, 5, 300, (v) => setterFn(jointName, v));
+  const hint = document.createElement("button");
+  hint.type = "button";
+  hint.className = "thickness-hint";
+  hint.title = "リンク長から算出した目安値です（構造計算ではありません）。クリックで適用。";
+  hint.addEventListener("click", () => {
+    const rec = parseFloat(hint.dataset.recommended);
+    if (!isFinite(rec)) return;
+    thickness.setExternally(rec);
+    setterFn(jointName, rec);
+    render();
+  });
+  wrap.appendChild(thickness.input);
+  wrap.appendChild(hint);
+  field.appendChild(wrap);
+  return { thickness, hint };
+}
+
+// overrideKey: the exact key this override should apply under in
+// PART_WEIGHT_OVERRIDE_G (matching a linkMassesG key from
+// estimateAllLinkMasses, e.g. "neck_yaw" or "hand_l_link" -- see the
+// section header's part-mapping table) -- or, for HAND_OWN_MASS_G'S
+// additive fields, a synthetic key handled by a custom setter instead.
+function addWeightField(p, overrideKey, autoValueFn, labelText, setterOverride) {
+  const field = p.addField(labelText || "重量 (g)");
+  const setter = setterOverride || ((v) => setPartWeightOverride(overrideKey, v));
+  const initial = setterOverride ? null : (overrideKey in PART_WEIGHT_OVERRIDE_G ? PART_WEIGHT_OVERRIDE_G[overrideKey] : null);
+  const comp = makeWeightOverrideInputComponent(initial, setter);
+  field.appendChild(comp.wrap);
+  weightHintUpdaters.push({ comp, autoValueFn });
+  if (!setterOverride) weightOverrideComponents[overrideKey] = comp;
+  return comp;
+}
+
+// Number input that treats an EMPTY value as a legitimate, immediately-
+// valid "auto" state (not "invalid, mid-typing") -- unlike every other
+// validated field in this file, clearing this one to empty IS the
+// intended final state, not a stepping-stone. Otherwise reuses the exact
+// same baseline-on-focus/revert-on-invalid-blur discipline as
+// makeValidatedNumberInput (Section 7) so a genuinely invalid entry
+// (negative, out of range, garbage) still can't corrupt state -- see
+// that function's own comment for the a5ec3bf/c09f7f3 history this
+// guards against. The hint/reset button always clears back to auto
+// (per the M6 brief's "自動計算に戻す" button), unlike the thickness
+// hint button it's styled after, which applies a suggested value.
+function makeWeightOverrideInputComponent(initialOverride, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "thickness-control";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.max = "50000";
+  input.step = "1";
+  input.placeholder = "自動";
+  input.value = initialOverride === null || initialOverride === undefined ? "" : String(initialOverride);
+  let committedValue = initialOverride === undefined ? null : initialOverride;
+  let baseline; // undefined when not mid-edit; else the value (or null) to revert to
+
+  function apply(v) {
+    committedValue = v;
+    onChange(v);
+    render();
+  }
+  function setExternally(v) {
+    committedValue = v;
+    baseline = undefined;
+    input.value = v === null || v === undefined ? "" : String(v);
+  }
+  input.addEventListener("focus", () => {
+    baseline = committedValue;
+  });
+  input.addEventListener("input", () => {
+    const raw = input.value;
+    if (raw.trim() === "") {
+      apply(null);
+      return;
+    }
+    const v = parseFloat(raw);
+    if (!isFinite(v) || v < 0 || v > 50000) return; // mid-typing ("-", etc.): leave alone
+    apply(v);
+  });
+  input.addEventListener("blur", () => {
+    const raw = input.value;
+    if (raw.trim() === "") {
+      committedValue = null;
+      baseline = undefined;
+      return;
+    }
+    const v = parseFloat(raw);
+    if (!isFinite(v) || v < 0 || v > 50000) {
+      const revertTo = baseline === undefined ? committedValue : baseline;
+      input.value = revertTo === null || revertTo === undefined ? "" : String(revertTo);
+      apply(revertTo);
+      flashInvalid(input);
+    } else {
+      committedValue = v;
+    }
+    baseline = undefined;
+  });
+
+  const hint = document.createElement("button");
+  hint.type = "button";
+  hint.className = "thickness-hint";
+  hint.title = "ジオメトリから自動計算した推定値を使用します（クリックで自動計算に戻す）。";
+  hint.addEventListener("click", () => setExternally(null) || apply(null));
+
+  wrap.appendChild(input);
+  wrap.appendChild(hint);
+
+  function updateHint(autoG) {
+    hint.textContent = "自動計算に戻す (自動: 約" + Math.round(autoG) + "g)";
+  }
+
+  return { input, hint, wrap, setExternally, updateHint };
+}
+
+function addMountAngleField(p, joint, labelText) {
+  const field = p.addField(labelText || "取付角度 (deg)");
+  const pair = document.createElement("div");
+  pair.className = "range-pair";
+  const axisFields = [
+    ["X", "mount_rx_deg", "rx"],
+    ["Y", "mount_ry_deg", "ry"],
+    ["Z", "mount_rz_deg", "rz"],
+  ];
+  const entry = {};
+  for (const [label, key, entryKey] of axisFields) {
+    const tag = document.createElement("span");
+    tag.className = "axis-tag";
+    tag.textContent = label;
+    pair.appendChild(tag);
+    const created = makeValidatedNumberInput(joint[key], -180, 180, (v) => { joint[key] = v; });
+    created.input.className = "narrow";
+    pair.appendChild(created.input);
+    entry[entryKey] = created;
+  }
+  field.appendChild(pair);
+  mountInputs[joint.name] = entry;
+  return entry;
+}
+
+// Recomputes every weight field's "recommended value" hint from its
+// current geometry, same live-refresh pattern as updateThicknessHints
+// (Section 7). Called from render().
+function updateWeightHints() {
+  for (const { comp, autoValueFn } of weightHintUpdaters) {
+    comp.updateHint(autoValueFn());
+  }
+}
+
+// ---- 胴体 (torso): neck_yaw's incoming link ----
+{
+  const p = addPartDetails("torso", "胴体 (torso)");
+  lengthInputs.neck_yaw = addLengthField(p, "neck_yaw", () => JOINTS_BY_NAME.neck_yaw.origin_offset_mm, setLinkLength);
+  const t = addThicknessField(p, "neck_yaw", JOINTS_BY_NAME.neck_yaw.link_thickness_mm, setLinkThickness);
+  thicknessInputs.neck_yaw = t.thickness;
+  thicknessHintEls.neck_yaw = t.hint;
+  addWeightField(p, "neck_yaw", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.neck_yaw.origin_offset_mm), JOINTS_BY_NAME.neck_yaw.link_thickness_mm));
+  addMountAngleField(p, JOINTS_BY_NAME.neck_yaw);
+}
+
+// ---- 鎖骨 (clavicle): both shoulders' origin_offset_mm ----
+// Length is READ-ONLY here (see the section header's part-mapping table
+// for why) -- the underlying knobs are still each shoulder's own offset
+// length, exposed here as two explicit sub-fields rather than hidden,
+// since that's genuinely how a user can influence it; the panel shows
+// the TRUE FK-derived total alongside them so it's obvious the two
+// aren't independent of that total. Thickness is a real, independent new
+// value. "Weight" is deliberately two fields (left/right), each reusing
+// that shoulder's own EXISTING link_masses_g entry -- see the section
+// header's CONSTRAINT note for why this isn't a new anchor point. Mount
+// angle is ALSO two fields (left/right): shoulder_pitch_l/r each have
+// their OWN mount_r{x,y,z}_deg (distinct from elbow_pitch_l/r's, which
+// live under 上腕/upper-arm below) -- since shoulder's own offset is
+// what this part's length/weight fields already govern, its mount angle
+// belongs here too, by the same "goes with whatever owns the incoming
+// link" rule used for every other part in this section.
+{
+  const p = addPartDetails("clavicle", "鎖骨 (clavicle)");
+  lengthInputs.shoulder_pitch_l = addLengthField(p, "shoulder_pitch_l", () => JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm, setLinkLength, "左肩オフセット長 (mm)");
+  lengthInputs.shoulder_pitch_r = addLengthField(p, "shoulder_pitch_r", () => JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm, setLinkLength, "右肩オフセット長 (mm)");
+  const lenInfo = p.addInfoRow("");
+  partReadonlyEls.clavicle_length = lenInfo;
+  const t = addThicknessField(p, "clavicle", CLAVICLE_THICKNESS_MM, (_name, v) => { CLAVICLE_THICKNESS_MM = v; }, "太さ (直径mm)");
+  clavicleThicknessInput = t.thickness;
+  addWeightField(p, "shoulder_pitch_l", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm), JOINTS_BY_NAME.shoulder_pitch_l.link_thickness_mm), "左肩取付部 重量 (g)");
+  addWeightField(p, "shoulder_pitch_r", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm), JOINTS_BY_NAME.shoulder_pitch_r.link_thickness_mm), "右肩取付部 重量 (g)");
+  addMountAngleField(p, JOINTS_BY_NAME.shoulder_pitch_l, "左肩 取付角度 (deg)");
+  addMountAngleField(p, JOINTS_BY_NAME.shoulder_pitch_r, "右肩 取付角度 (deg)");
+}
+
+// ---- 首 (neck): neck_pitch's incoming link ----
+// Owns neck_pitch's mount angle -- see the section header's "MOUNT-ANGLE
+// SPLITTING DECISION" for why 頭部支持 doesn't get its own copy.
+{
+  const p = addPartDetails("neck", "首 (neck)");
+  lengthInputs.neck_pitch = addLengthField(p, "neck_pitch", () => JOINTS_BY_NAME.neck_pitch.origin_offset_mm, setLinkLength);
+  const t = addThicknessField(p, "neck_pitch", JOINTS_BY_NAME.neck_pitch.link_thickness_mm, setLinkThickness);
+  thicknessInputs.neck_pitch = t.thickness;
+  thicknessHintEls.neck_pitch = t.hint;
+  addWeightField(p, "neck_pitch", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.neck_pitch.origin_offset_mm), JOINTS_BY_NAME.neck_pitch.link_thickness_mm));
+  addMountAngleField(p, JOINTS_BY_NAME.neck_pitch);
+}
+
+// ---- 頭部支持 (head mount stub): neck_pitch's end-effector link ----
+{
+  const p = addPartDetails("head_mount", "頭部支持 (head mount)");
+  eeLengthInputs.neck_pitch = addLengthField(p, "neck_pitch", () => JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm, setEndEffectorLength, "長さ (mm)");
+  const t = addThicknessField(p, "neck_pitch", JOINTS_BY_NAME.neck_pitch.end_effector_thickness_mm, setEndEffectorThickness);
+  eeThicknessInputs.neck_pitch = t.thickness;
+  eeThicknessHintEls.neck_pitch = t.hint;
+  addWeightField(p, "head_link", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm), JOINTS_BY_NAME.neck_pitch.end_effector_thickness_mm));
+  p.addInfoRow("取付角度: 「首」パーツの設定がこのリンクの向きにも影響します（関節の回転軸と同じ取付フレームを共有するため）。");
+}
+
+// ---- 頭部 (head): the head sphere, not a link ----
+// Weight deliberately reuses the EXISTING head payload_mass_g (relabeled
+// here) rather than inventing a new geometric mass concept for a bare
+// decorative sphere -- see the section header's part-mapping table.
+{
+  const p = addPartDetails("head", "頭部 (head)");
+  const sizeField = p.addField("頭のサイズ (半径mm)");
+  const size = makeValidatedNumberInput(HEAD_RADIUS_MM, 20, 300, (v) => { HEAD_RADIUS_MM = v; });
+  headSizeInput = size;
+  sizeField.appendChild(size.input);
+  const weightField = p.addField("頭部の重量 (g)");
+  const weight = makeValidatedNumberInput(PAYLOAD_MASS_G.head, 0, 20000, (v) => { PAYLOAD_MASS_G.head = v; });
+  payloadInputs.head = weight;
+  weightField.appendChild(weight.input);
+}
+
+// ---- 上腕 (upper arm) L/R: elbow_pitch_l/r's incoming link ----
+// Owns elbow_pitch_l/r's mount angle -- see the section header's "MOUNT-
+// ANGLE SPLITTING DECISION" for why 前腕 doesn't get its own copy.
+for (const [side, jointName, label] of [["l", "elbow_pitch_l", "上腕 (左, upper arm L)"], ["r", "elbow_pitch_r", "上腕 (右, upper arm R)"]]) {
+  const p = addPartDetails("upper_arm_" + side, label);
+  lengthInputs[jointName] = addLengthField(p, jointName, () => JOINTS_BY_NAME[jointName].origin_offset_mm, setLinkLength);
+  const t = addThicknessField(p, jointName, JOINTS_BY_NAME[jointName].link_thickness_mm, setLinkThickness);
+  thicknessInputs[jointName] = t.thickness;
+  thicknessHintEls[jointName] = t.hint;
+  addWeightField(p, jointName, () => estimateLinkMassG(vecLen(JOINTS_BY_NAME[jointName].origin_offset_mm), JOINTS_BY_NAME[jointName].link_thickness_mm));
+  addMountAngleField(p, JOINTS_BY_NAME[jointName]);
+}
+
+// ---- 前腕 (forearm) L/R: elbow_pitch_l/r's end-effector link ----
+// No weight field of its own: its underlying mass (hand_l_link/
+// hand_r_link) is presented under 手/hand instead, alongside 手's own
+// additive extra mass -- see the section header's CONSTRAINT note.
+for (const [side, jointName, eeName, label] of [["l", "elbow_pitch_l", "hand_l", "前腕 (左, forearm L)"], ["r", "elbow_pitch_r", "hand_r", "前腕 (右, forearm R)"]]) {
+  const p = addPartDetails("forearm_" + side, label);
+  eeLengthInputs[jointName] = addLengthField(p, jointName, () => JOINTS_BY_NAME[jointName].end_effector_offset_mm, setEndEffectorLength, "長さ (mm)");
+  const t = addThicknessField(p, jointName, JOINTS_BY_NAME[jointName].end_effector_thickness_mm, setEndEffectorThickness);
+  eeThicknessInputs[jointName] = t.thickness;
+  eeThicknessHintEls[jointName] = t.hint;
+  p.addInfoRow("重量は「手」パーツにまとめて表示されます。取付角度は「上腕」パーツの設定がこのリンクの向きにも影響します。");
+}
+
+// ---- 手 (hand) L/R: the hand sphere, not a link ----
+// Own weight (NEW, additive on top of 前腕's hand_l_link/hand_r_link
+// mass -- see assembleLinkMassesWithOverrides, Section 2B) kept clearly
+// distinct from payload (existing, relocated here). Deliberately a plain
+// number field (default 0), NOT the auto/override hint pattern the other
+// weight fields use: unlike those, this field has no geometric "auto
+// estimate of itself" to fall back to -- it's purely an extra add-on
+// mass -- so a "自動計算に戻す (自動: 約Xg)" hint would misleadingly
+// imply resetting it would SET it to the forearm's own mass, rather than
+// to 0 (no extra mass). A plain field with an obvious 0 default avoids
+// that.
+for (const [side, eeName, label] of [["l", "hand_l", "手 (左, hand L)"], ["r", "hand_r", "手 (右, hand R)"]]) {
+  const p = addPartDetails("hand_" + side, label);
+  const sizeField = p.addField("手のサイズ (半径mm)");
+  const size = makeValidatedNumberInput(HAND_RADIUS_MM[side], 15, 200, (v) => { HAND_RADIUS_MM[side] = v; });
+  handSizeInputs[side] = size;
+  sizeField.appendChild(size.input);
+
+  const ownWeightField = p.addField("手の重量 (パーツ自体, g)");
+  const ownWeight = makeValidatedNumberInput(HAND_OWN_MASS_G[eeName], 0, 20000, (v) => { HAND_OWN_MASS_G[eeName] = v; });
+  handOwnMassInputs[eeName] = ownWeight;
+  ownWeightField.appendChild(ownWeight.input);
+
+  const payloadField = p.addField("ペイロード (持ち物, g)");
+  const payload = makeValidatedNumberInput(PAYLOAD_MASS_G[eeName], 0, 20000, (v) => { PAYLOAD_MASS_G[eeName] = v; });
+  payloadInputs[eeName] = payload;
+  payloadField.appendChild(payload.input);
+}
+
+stopMotion(); // now safe: PAYLOAD_MASS_G and every other M6 top-level const above is initialized
+
+/* =====================================================================
+ * SECTION 8: RESIZE + RENDER LOOP
+ * ===================================================================== */
 
 /* =====================================================================
  * SECTION 8: RESIZE + RENDER LOOP
