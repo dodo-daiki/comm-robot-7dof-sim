@@ -152,6 +152,73 @@
     accent-color: #8a7a63;
     display: block;
   }
+  /* Pose sliders are locked (disabled) while a sample motion is actively
+     playing -- see Section 7B -- so manual dragging can't fight the
+     animation; the dimmed/not-allowed treatment is the "visually
+     indicate they're locked" signal called for in the M4 brief. */
+  details.joint-accordion input[type="range"]:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* ---- sample motion playback panel (Section 7B) ---- */
+  #motion-select {
+    width: 100%;
+    font-size: 12.5px;
+    padding: 5px 6px;
+    border: 1px solid #cfc6b4;
+    border-radius: 5px;
+    background: #fff;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+  }
+  .motion-buttons {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .motion-buttons button {
+    flex: 1 1 0;
+    padding: 7px 0;
+    font-size: 12.5px;
+    border: 1px solid #b9ad98;
+    background: #f4efe6;
+    color: #4a4030;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .motion-buttons button:hover:not(:disabled) {
+    background: #ecdfc9;
+  }
+  .motion-buttons button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .motion-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #666;
+    font-variant-numeric: tabular-nums;
+  }
+  .motion-progress-track {
+    flex: 1 1 auto;
+    height: 5px;
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .motion-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #8a7a63;
+    border-radius: 3px;
+  }
+  #motion-progress-label {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
   .joint-details {
     padding: 4px 10px 10px 10px;
     border-top: 1px dashed rgba(0, 0, 0, 0.1);
@@ -263,6 +330,19 @@
 <div id="ui-panel">
   <h1>7-DOFロボット<br>ビューア</h1>
   <p class="subtitle">各関節をクリックで展開すると、リンク長・可動範囲・モーター・回転軸を編集できます。<br>マウスドラッグ: 視点回転 / ホイール: ズーム</p>
+
+  <h2 class="section-heading">サンプル動作</h2>
+  <select id="motion-select"></select>
+  <div class="motion-buttons">
+    <button id="motion-play-btn" type="button">再生</button>
+    <button id="motion-stop-btn" type="button">停止</button>
+  </div>
+  <div class="motion-progress">
+    <div class="motion-progress-track"><div id="motion-progress-fill" class="motion-progress-fill"></div></div>
+    <span id="motion-progress-label">0.0s / 0.0s</span>
+  </div>
+
+  <h2 class="section-heading">関節</h2>
   <div id="joint-sliders"></div>
   <button id="reset-btn" type="button">デフォルトに戻す</button>
 </div>
@@ -1701,7 +1781,339 @@ function buildJointAccordion(j) {
 
 for (const j of JOINTS) buildJointAccordion(j);
 
+/* =====================================================================
+ * SECTION 7B: SAMPLE MOTION PLAYBACK (M4)
+ * ---------------------------------------------------------------------
+ * A small library of preset keyframed animations of the 7 POSE ANGLES
+ * only (currentAngles) -- never mount rotation, link length, thickness,
+ * motor, or axis, which are static design parameters, not something a
+ * "motion" plays back. Pure client-side JS driven by requestAnimationFrame,
+ * no Python/Streamlit involved (there isn't one yet).
+ *
+ * KEYFRAME FORMAT: { time_s, angles: { [jointName]: degrees, ... } }.
+ * A keyframe doesn't need to mention every joint. For each joint
+ * independently, we collect just the keyframes that DO mention it (in
+ * time order) into that joint's own sparse timeline, then linearly
+ * interpolate (eased) between the two entries bracketing the current
+ * playback time -- OR, at a time before that joint's first entry or after
+ * its last, HOLD that entry's value.
+ *
+ * IMPORTANT: interpolation happens between a joint's own two CONSECUTIVE
+ * entries, however far apart in time they are -- it does NOT "hold" a
+ * value just because other joints have keyframes in between. To hold a
+ * joint at a value across a span (e.g. the wave motion keeping
+ * shoulder_pitch_l raised while only elbow_pitch_l oscillates), repeat
+ * that same value at both ends of the span; interpolating a constant
+ * against itself is a no-op, which is exactly "hold". (An earlier draft
+ * of the wave motion skipped this and the shoulder slowly drooped back
+ * toward 0 across the whole oscillation instead of staying raised --
+ * caught by eyeballing a mid-playback screenshot, not just reading the
+ * numbers back.)
+ *
+ * A joint mentioned nowhere in a motion is left untouched during
+ * playback (defensive fallback only -- every motion below explicitly
+ * gives all 7 joints an angle at time_s: 0, so playback always starts
+ * from a fully known, deterministic pose regardless of whatever the
+ * sliders were showing before Play was pressed).
+ * ===================================================================== */
+
+const SAMPLE_MOTIONS = {
+  nod: {
+    label_ja: "うなずき",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.25, angles: { neck_pitch: -20 } },
+      { time_s: 0.5, angles: { neck_pitch: 0 } },
+      { time_s: 0.75, angles: { neck_pitch: -20 } },
+      { time_s: 1.0, angles: { neck_pitch: 0 } },
+      { time_s: 1.25, angles: { neck_pitch: -20 } },
+      { time_s: 1.5, angles: { neck_pitch: 0 } },
+    ],
+  },
+  look_around: {
+    label_ja: "首振り",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.7, angles: { neck_yaw: -45 } },
+      { time_s: 1.4, angles: { neck_yaw: 0 } },
+      { time_s: 2.1, angles: { neck_yaw: 45 } },
+      { time_s: 2.8, angles: { neck_yaw: 0 } },
+    ],
+  },
+  // Raises the left arm via shoulder_pitch_l (positive angle sweeps the
+  // upper arm forward-then-up -- see the axis-direction note below), then
+  // oscillates elbow_pitch_l a few times while the shoulder HOLDS raised,
+  // approximating a wave within this robot's pitch-only arm DOF (no
+  // shoulder roll/yaw for a true sideways-raised wave -- see the report).
+  wave: {
+    label_ja: "手を振る",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.6, angles: { shoulder_pitch_l: 100, elbow_pitch_l: 40 } },
+      { time_s: 0.9, angles: { elbow_pitch_l: 90 } },
+      { time_s: 1.2, angles: { elbow_pitch_l: 50 } },
+      { time_s: 1.5, angles: { elbow_pitch_l: 90 } },
+      { time_s: 1.8, angles: { elbow_pitch_l: 50 } },
+      { time_s: 2.1, angles: { elbow_pitch_l: 90 } },
+      // shoulder_pitch_l is repeated here at the SAME value (100) it was
+      // set to at t=0.6 -- without this, its own sparse timeline would
+      // only have entries at 0.6 (100) and 2.8 (0), and sampleJointAngle()
+      // interpolates BETWEEN a joint's own consecutive entries regardless
+      // of how far apart they are, so the shoulder would slowly droop
+      // across the entire 0.6->2.8 span instead of staying raised while
+      // only the elbow oscillates. Repeating a value is how you express
+      // "hold" in this sparse-keyframe format -- see the Section 7B header
+      // comment.
+      { time_s: 2.4, angles: { shoulder_pitch_l: 100, elbow_pitch_l: 50 } },
+      { time_s: 2.8, angles: { shoulder_pitch_l: 0, elbow_pitch_l: 0 } },
+    ],
+  },
+  // Primarily a neck_pitch forward dip, plus a small synchronized forward
+  // shoulder_pitch_l/r motion on both arms for a bit more "whole-body"
+  // greeting feel -- this is an approximation, since there's no waist
+  // pitch to add a true torso lean (see the report).
+  bow: {
+    label_ja: "会釈",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.4, angles: { neck_pitch: -15, shoulder_pitch_l: 12, shoulder_pitch_r: 12 } },
+      { time_s: 0.7, angles: { neck_pitch: -15, shoulder_pitch_l: 12, shoulder_pitch_r: 12 } },
+      { time_s: 1.1, angles: { neck_pitch: 0, shoulder_pitch_l: 0, shoulder_pitch_r: 0 } },
+    ],
+  },
+  // Loops indefinitely (see `loop: true`). The LAST keyframe's angles
+  // exactly match the FIRST keyframe's so the loop wraps with no visible
+  // snap. Small enough amplitudes (waist_yaw <= 4 deg, neck_yaw <= 3 deg,
+  // neck_pitch <= 2 deg) to read as a subtle "still alive, breathing"
+  // sway rather than an actual gesture.
+  idle: {
+    label_ja: "アイドル",
+    loop: true,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 2.0, angles: { waist_yaw: 4, neck_yaw: -3, neck_pitch: -2 } },
+      { time_s: 4.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 1 } },
+      { time_s: 6.0, angles: { waist_yaw: -4, neck_yaw: 3, neck_pitch: -2 } },
+      { time_s: 8.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0 } },
+    ],
+  },
+};
+const MOTION_ORDER = ["nod", "look_around", "wave", "bow", "idle"];
+
+function motionDurationOf(motion) {
+  return motion.keyframes[motion.keyframes.length - 1].time_s;
+}
+
+// Builds (once per motion, memoized directly on the motion object) a
+// per-joint sparse timeline: { [jointName]: [{t, angle}, ...] } sorted by
+// t, containing only the keyframes that actually mention that joint.
+function jointTimelines(motion) {
+  if (motion._timelines) return motion._timelines;
+  const timelines = {};
+  for (const kf of motion.keyframes) {
+    for (const name of Object.keys(kf.angles)) {
+      if (!timelines[name]) timelines[name] = [];
+      timelines[name].push({ t: kf.time_s, angle: kf.angles[name] });
+    }
+  }
+  motion._timelines = timelines;
+  return timelines;
+}
+
+// Smoothstep ease-in/out, applied independently within each keyframe-to-
+// keyframe segment (not globally across the whole motion) -- simple and
+// enough to take the mechanical edge off linear interpolation without
+// building a full spline-through-multiple-keyframes system.
+function easeInOut(x) {
+  return x * x * (3 - 2 * x);
+}
+
+// Interpolates ONE joint's angle at time `t` from its sparse timeline;
+// holds the first/last entry's value outside the timeline's own span.
+function sampleJointAngle(timeline, t) {
+  if (t <= timeline[0].t) return timeline[0].angle;
+  const last = timeline[timeline.length - 1];
+  if (t >= last.t) return last.angle;
+  for (let i = 0; i < timeline.length - 1; i++) {
+    const a = timeline[i];
+    const b = timeline[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const span = b.t - a.t;
+      const frac = span > 1e-9 ? (t - a.t) / span : 1;
+      return a.angle + (b.angle - a.angle) * easeInOut(frac);
+    }
+  }
+  return last.angle; // unreachable given the bounds checks above
+}
+
+// Full 7-joint pose (only for joints this motion actually animates) at
+// time `t`. NOT range-clamped here -- that happens in applyMotionPose(),
+// against each joint's CURRENT (possibly user-edited) range_deg.
+function sampleMotionPose(motion, t) {
+  const timelines = jointTimelines(motion);
+  const pose = {};
+  for (const j of JOINTS) {
+    const timeline = timelines[j.name];
+    if (timeline) pose[j.name] = sampleJointAngle(timeline, t);
+  }
+  return pose;
+}
+
+// ---- playback state ----
+let activeMotionKey = MOTION_ORDER[0];
+let motionState = "stopped"; // "stopped" | "playing" | "paused" | "finished"
+let motionElapsed = 0; // seconds into the current motion
+let motionLastTickMs = null;
+let motionRafHandle = null;
+
+const motionSelect = document.getElementById("motion-select");
+const motionPlayBtn = document.getElementById("motion-play-btn");
+const motionStopBtn = document.getElementById("motion-stop-btn");
+const motionProgressFill = document.getElementById("motion-progress-fill");
+const motionProgressLabel = document.getElementById("motion-progress-label");
+
+for (const key of MOTION_ORDER) {
+  const opt = document.createElement("option");
+  opt.value = key;
+  opt.textContent = SAMPLE_MOTIONS[key].label_ja;
+  motionSelect.appendChild(opt);
+}
+motionSelect.value = activeMotionKey;
+
+// Applies a (possibly partial) pose to currentAngles/sliders/render(),
+// clamping every value through the SAME clampAngle() helper the pose
+// sliders and reset-to-defaults already use, against each joint's
+// CURRENT range_deg -- so a motion can never drive a joint outside a
+// range the user has live-edited via the detail panel, even if that
+// range is narrower than what the motion was originally designed for.
+function applyMotionPose(pose) {
+  for (const name of Object.keys(pose)) {
+    const joint = JOINTS_BY_NAME[name];
+    const clamped = clampAngle(pose[name], joint.range_deg);
+    currentAngles[name] = clamped;
+    sliderInputs[name].value = String(clamped);
+    valueLabels[name].textContent = clamped.toFixed(0) + "°";
+  }
+  render();
+}
+
+// Pose sliders are read-only, animated feedback while a motion is
+// actively PLAYING (not merely selected/paused/stopped) -- dragging one
+// mid-playback would immediately be overwritten by the next animation
+// frame anyway, so disabling it (dimmed via the :disabled CSS above) is
+// clearer than letting the user fight it.
+function setPoseSlidersLocked(locked) {
+  for (const j of JOINTS) sliderInputs[j.name].disabled = locked;
+}
+
+function updateMotionProgressUI(motion, elapsed, duration) {
+  if (motion.loop) {
+    const frac = duration > 0 ? (elapsed % duration) / duration : 0;
+    motionProgressFill.style.width = (frac * 100).toFixed(1) + "%";
+    motionProgressLabel.textContent = "ループ再生中 (" + duration.toFixed(1) + "s周期)";
+  } else {
+    const frac = duration > 0 ? Math.min(1, elapsed / duration) : 0;
+    motionProgressFill.style.width = (frac * 100).toFixed(1) + "%";
+    motionProgressLabel.textContent = elapsed.toFixed(1) + "s / " + duration.toFixed(1) + "s";
+  }
+}
+
+function updateMotionButtons() {
+  motionPlayBtn.textContent = motionState === "playing" ? "一時停止" : "再生";
+  motionStopBtn.disabled = motionState === "stopped";
+}
+
+// One requestAnimationFrame tick: advances motionElapsed by real wall-
+// clock delta (not a fixed step), applies the interpolated+clamped pose,
+// and either loops (loop:true motions wrap modulo duration forever) or
+// finishes (one-shot motions stop at their own final keyframe -- the
+// robot is deliberately left posed there, NOT snapped back to zero; use
+// Stop for that) and hands control back to the user.
+function motionTick(nowMs) {
+  if (motionState !== "playing") return; // stray frame after pause/stop: no-op
+  const motion = SAMPLE_MOTIONS[activeMotionKey];
+  const duration = motionDurationOf(motion);
+  const dtS = motionLastTickMs === null ? 0 : (nowMs - motionLastTickMs) / 1000;
+  motionLastTickMs = nowMs;
+  motionElapsed += dtS;
+
+  if (motion.loop) {
+    if (duration > 0) motionElapsed = motionElapsed % duration;
+  } else if (motionElapsed >= duration) {
+    motionElapsed = duration;
+    applyMotionPose(sampleMotionPose(motion, motionElapsed));
+    updateMotionProgressUI(motion, motionElapsed, duration);
+    motionRafHandle = null;
+    motionState = "finished";
+    setPoseSlidersLocked(false);
+    updateMotionButtons();
+    return;
+  }
+
+  applyMotionPose(sampleMotionPose(motion, motionElapsed));
+  updateMotionProgressUI(motion, motionElapsed, duration);
+  motionRafHandle = requestAnimationFrame(motionTick);
+}
+
+// Starting playback ALWAYS re-asserts the motion's own computed pose for
+// the current motionElapsed (0 if starting fresh from stopped/finished,
+// or wherever it was paused) -- so any manual slider tweak made while
+// paused (sliders are unlocked then, per the M4 brief) is intentionally
+// discarded the moment playback resumes, rather than producing a hybrid
+// pose.
+function playMotion() {
+  if (motionState === "stopped" || motionState === "finished") motionElapsed = 0;
+  motionState = "playing";
+  motionLastTickMs = null; // avoid a large dt jump from time spent paused
+  setPoseSlidersLocked(true);
+  updateMotionButtons();
+  motionRafHandle = requestAnimationFrame(motionTick);
+}
+
+function pauseMotion() {
+  motionState = "paused";
+  if (motionRafHandle !== null) { cancelAnimationFrame(motionRafHandle); motionRafHandle = null; }
+  setPoseSlidersLocked(false);
+  updateMotionButtons();
+}
+
+// Halts playback (if any) and resets the CURRENTLY SELECTED motion back
+// to its own time_s: 0 pose (every motion above starts all-zero, but this
+// reads it from the motion itself rather than hardcoding zero). Also used
+// internally to reach a clean, deterministic state when switching motions
+// or before "reset to defaults" touches pose-related fields.
+function stopMotion() {
+  if (motionRafHandle !== null) { cancelAnimationFrame(motionRafHandle); motionRafHandle = null; }
+  motionState = "stopped";
+  motionElapsed = 0;
+  setPoseSlidersLocked(false);
+  const motion = SAMPLE_MOTIONS[activeMotionKey];
+  applyMotionPose(sampleMotionPose(motion, 0));
+  updateMotionProgressUI(motion, 0, motionDurationOf(motion));
+  updateMotionButtons();
+}
+
+motionPlayBtn.addEventListener("click", () => {
+  if (motionState === "playing") pauseMotion();
+  else playMotion();
+});
+motionStopBtn.addEventListener("click", stopMotion);
+motionSelect.addEventListener("change", () => {
+  activeMotionKey = motionSelect.value;
+  stopMotion();
+});
+
+stopMotion(); // initialize progress label/buttons/pose for the default-selected motion
+
 document.getElementById("reset-btn").addEventListener("click", () => {
+  // Halt any in-progress/completed motion FIRST so it can't race with (or
+  // get stepped on by) the per-joint reset below, and so the pose sliders
+  // are guaranteed unlocked before this handler touches their .value.
+  stopMotion();
   for (const j of JOINTS) {
     const def = DEFAULT_JOINTS_BY_NAME[j.name];
     j.origin_offset_mm = def.origin_offset_mm.slice();
