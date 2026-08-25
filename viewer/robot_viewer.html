@@ -444,6 +444,73 @@
     color: #5b4d3a;
   }
 
+  /* ---- torque / payload display (Section 7D, M5) ---- */
+  .torque-pill {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #999;
+  }
+  .torque-pill.ok { background: #4a9f5e; }
+  .torque-pill.warn { background: #d9a63e; }
+  .torque-pill.over { background: #c0453f; }
+  .torque-pill.stall {
+    background: #7a1a1a;
+    box-shadow: 0 0 0 2px rgba(122, 26, 26, 0.35);
+  }
+  .torque-field-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .torque-field-text {
+    font-size: 11.5px;
+    color: #444;
+    font-variant-numeric: tabular-nums;
+  }
+  .torque-summary-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 3px;
+    margin: 6px 0 10px 0;
+    padding: 8px 6px;
+    background: rgba(250, 248, 244, 0.6);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+  }
+  .torque-summary-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font-size: 9px;
+    color: #777;
+    cursor: default;
+  }
+  .torque-summary-item .torque-pill {
+    width: 12px;
+    height: 12px;
+  }
+  .torque-payload-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11.5px;
+    color: #444;
+    margin-top: 7px;
+  }
+  .torque-payload-row input[type="number"] {
+    width: 64px;
+    font-size: 11.5px;
+    padding: 3px 4px;
+    border: 1px solid #cfc6b4;
+    border-radius: 4px;
+    box-sizing: border-box;
+  }
+
   #reset-btn {
     width: 100%;
     margin-top: 12px;
@@ -511,6 +578,22 @@
       <div id="custom-import-message" class="custom-kf-message" hidden></div>
     </div>
   </details>
+
+  <h2 class="section-heading">トルク・負荷</h2>
+  <p class="subtitle">現在のポーズで各関節モーターにかかる推定重力トルクです。緑=定格の70%未満、黄=定格に接近/到達、赤=定格超過、濃赤=ストール超過(そのポーズを保持不可)。リンク長・太さ・モーター・取付角度・ポーズを変えるたびに再計算されます。</p>
+  <div id="torque-summary-row" class="torque-summary-row"></div>
+  <div class="torque-payload-row">
+    <span class="field-label">頭部ペイロード (g)</span>
+    <span id="payload-head-slot"></span>
+  </div>
+  <div class="torque-payload-row">
+    <span class="field-label">左手ペイロード (g)</span>
+    <span id="payload-hand-l-slot"></span>
+  </div>
+  <div class="torque-payload-row">
+    <span class="field-label">右手ペイロード (g)</span>
+    <span id="payload-hand-r-slot"></span>
+  </div>
 
   <h2 class="section-heading">関節</h2>
   <div id="joint-sliders"></div>
@@ -700,16 +783,15 @@ const ROBOT_CONFIG_DEFAULT = {
 /* =====================================================================
  * SECTION 1B: MOTOR SPECS
  * ---------------------------------------------------------------------
- * Mirrors the motor identities in robot/motor_specs.py (name, and -- for
- * the two models used anywhere in data/joints.json -- weight_g), plus
- * physical outer-case dimensions (diameter_mm / length_mm) that
- * robot/motor_specs.py does NOT currently carry (its MotorSpec dataclass
- * only has rated_torque_nm/stall_torque_nm/rated_speed_rpm/weight_g/
- * source_url -- torque/speed numbers aren't needed for this viewer, which
- * only renders each motor as a real-scale cylinder). The dimensions below
- * were supplied directly as part of the M4 viewer rework; if
- * robot/motor_specs.py ever grows physical-dimension fields, keep this
- * object in sync with that as the new source of truth.
+ * Mirrors the motor identities in robot/motor_specs.py -- name, weight_g,
+ * AND (as of M5) rated_torque_nm/stall_torque_nm, used by the Section 2B
+ * torque-margin display -- plus physical outer-case dimensions
+ * (diameter_mm / length_mm) that robot/motor_specs.py does NOT carry
+ * (its MotorSpec dataclass has no case-dimension fields; this viewer
+ * needs them only to render each motor as a real-scale cylinder). Keep
+ * rated_torque_nm/stall_torque_nm/weight_g in sync with
+ * robot/motor_specs.py's GIM4310_10/GIM4310_36 if those ever change --
+ * they're transcribed values, not derived.
  * ===================================================================== */
 
 const MOTOR_SPECS = {
@@ -717,8 +799,8 @@ const MOTOR_SPECS = {
   // source_url fields already point to for these two models:
   //   GIM4310-10: Ø53 x 32mm -- https://aifitlab.com/products/steadywin-gim4310-10-planetary-reducer-servo-motor
   //   GIM4310-36: Ø55 x 47mm -- https://lucidar.me/en/actuators/mit-motor-gim4310-36/
-  "GIM4310-10": { name: "GIM4310-10", diameter_mm: 53, length_mm: 32, weight_g: 217 },
-  "GIM4310-36": { name: "GIM4310-36", diameter_mm: 55, length_mm: 47, weight_g: 310 },
+  "GIM4310-10": { name: "GIM4310-10", diameter_mm: 53, length_mm: 32, weight_g: 217, rated_torque_nm: 2.05, stall_torque_nm: 5.6 },
+  "GIM4310-36": { name: "GIM4310-36", diameter_mm: 55, length_mm: 47, weight_g: 310, rated_torque_nm: 7.38, stall_torque_nm: 20.16 },
 };
 
 /* =====================================================================
@@ -934,6 +1016,212 @@ function forwardKinematics(jointsList, baseHeightMm, jointAnglesDeg) {
   const root = jointsList.find((j) => j.parent === null);
   visit(root.name, baseTransform);
   return transforms;
+}
+
+/* =====================================================================
+ * SECTION 2B: STATIC GRAVITY TORQUE (M5)
+ * ---------------------------------------------------------------------
+ * Faithful port of robot/mass_estimator.py + robot/dynamics.py -- a
+ * static free-body gravity-torque estimate (no inertia/velocity/
+ * friction), used to sanity-check the per-joint motor selection against
+ * the printed-link mass estimate. Ported here (not just re-derived from
+ * memory) by reading both Python modules directly; every function below
+ * names the Python function it mirrors. Pure math, no THREE.* or DOM --
+ * consumed by Section 7D, which wires it to the live UI.
+ *
+ * Depends on forwardKinematics/worldPosition/mat4Identity/rotateOnly/
+ * mountRotationMatrix4 (Section 2) and vecLen (Section 3, but a pure
+ * function with no THREE.js dependency of its own -- function hoisting
+ * makes the textual order irrelevant since nothing here is CALLED until
+ * well after the whole script, including Section 3, has run).
+ * ===================================================================== */
+
+// Mirrors mass_estimator.py's module-level constants.
+const PETG_DENSITY_G_CM3 = 1.27;
+const DEFAULT_WALL_MM = 2.5;
+const DEFAULT_INFILL_RATIO = 0.3;
+const DEFAULT_DIAMETER_MM = 40.0; // fallback only: waist_yaw has no link_thickness_mm (zero-length link, see estimateAllLinkMasses)
+
+// Mirrors mass_estimator.py::estimate_link_mass_g. wallMm/infillRatio/
+// densityGCm3 default to the same constants Python defaults to; this
+// viewer doesn't expose them as separate per-link UI controls (only
+// length + diameter, which the M4/M5 panels already make editable), so
+// they're effectively fixed here, same as the M5 brief specifies.
+function estimateLinkMassG(lengthMm, diameterMm, wallMm, infillRatio, densityGCm3) {
+  if (wallMm === undefined) wallMm = DEFAULT_WALL_MM;
+  if (infillRatio === undefined) infillRatio = DEFAULT_INFILL_RATIO;
+  if (densityGCm3 === undefined) densityGCm3 = PETG_DENSITY_G_CM3;
+
+  const outerRadiusMm = diameterMm / 2.0;
+  const innerRadiusMm = Math.max(outerRadiusMm - wallMm, 0.0); // clamp: solid rod, never negative
+
+  const outerVolumeMm3 = Math.PI * outerRadiusMm * outerRadiusMm * lengthMm;
+  const innerCoreVolumeMm3 = Math.PI * innerRadiusMm * innerRadiusMm * lengthMm;
+  const shellVolumeMm3 = outerVolumeMm3 - innerCoreVolumeMm3;
+
+  const totalVolumeMm3 = shellVolumeMm3 + infillRatio * innerCoreVolumeMm3;
+  const totalVolumeCm3 = totalVolumeMm3 / 1000.0; // 1 cm^3 = 1000 mm^3
+
+  return totalVolumeCm3 * densityGCm3;
+}
+
+// Mirrors mass_estimator.py::estimate_all_link_masses, but reads length
+// AND diameter from each joint's own LIVE (possibly user-edited)
+// origin_offset_mm / link_thickness_mm fields instead of taking a single
+// diameter override for every link -- this is the M5 "wire the existing
+// length/thickness UI into the mass formula" requirement. waist_yaw has
+// no link_thickness_mm (see ROBOT_CONFIG_DEFAULT, Section 1): its
+// length is always exactly 0 (zero origin_offset_mm), which already
+// forces mass to 0 regardless of diameter, so DEFAULT_DIAMETER_MM is
+// used there purely as a safe non-undefined fallback, never because it
+// actually affects the result.
+function estimateAllLinkMasses(jointsList) {
+  const masses = {};
+  for (const joint of jointsList) {
+    const lengthMm = vecLen(joint.origin_offset_mm);
+    const diameterMm = joint.link_thickness_mm !== undefined ? joint.link_thickness_mm : DEFAULT_DIAMETER_MM;
+    masses[joint.name] = estimateLinkMassG(lengthMm, diameterMm);
+
+    if (joint.end_effector_name) {
+      const eeLengthMm = vecLen(joint.end_effector_offset_mm);
+      const eeDiameterMm = joint.end_effector_thickness_mm !== undefined ? joint.end_effector_thickness_mm : DEFAULT_DIAMETER_MM;
+      masses[joint.end_effector_name + "_link"] = estimateLinkMassG(eeLengthMm, eeDiameterMm);
+    }
+  }
+  return masses;
+}
+
+const GRAVITY_M_S2 = 9.81; // mirrors dynamics.py::GRAVITY_M_S2
+
+function vecCross3(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function vecDot3(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+// Mirrors dynamics.py::_ancestor_chain_inclusive -- `jointName` and all
+// of its ancestors up to the root, as a Set of names.
+function ancestorChainInclusive(byName, jointName) {
+  const chain = new Set();
+  let name = jointName;
+  while (name !== null && name !== undefined) {
+    chain.add(name);
+    const j = byName[name];
+    name = j ? j.parent : null;
+  }
+  return chain;
+}
+
+// Mirrors dynamics.py::_joint_axis_world EXACTLY, extended with the
+// mount-rotation insertion already established for jointTransform() and
+// the motor-cylinder render loop (Section 5): parent_rotation @ R_mount @
+// axis_local. At mount_r{x,y,z}_deg = 0 (identity R_mount), this reduces
+// to Python's parent_rotation @ axis_local bit-for-bit, same reasoning
+// as jointTransform's own mount-rotation extension.
+function jointAxisWorld(joint, transforms, baseTransform) {
+  const parentRotation = joint.parent !== null ? transforms[joint.parent] : baseTransform;
+  const mountRotation = mountRotationMatrix4(joint);
+  const mountedAxisLocal = rotateOnly(mountRotation, joint.axis);
+  return rotateOnly(parentRotation, mountedAxisLocal);
+}
+
+// Mirrors dynamics.py::compute_joint_torques. See that function's own
+// docstring (read directly, not paraphrased) for the full definition;
+// summary: for every joint Q, sums r x F, dotted with Q's world axis,
+// over every link-mass point (each joint's own incoming link at its
+// midpoint, anchored to that joint's PARENT; each end-effector's
+// terminal-link mass at ITS midpoint plus an optional payload mass at
+// its own world position, both anchored to the leaf joint itself) and
+// every joint's own motor mass (at that joint's own world position,
+// anchored to that joint), where "anchored to X" means the load is
+// included in Q's torque iff Q is in the ancestor-inclusive chain of X
+// (Q == X or Q is an ancestor of X) -- ported as a literal line-for-line
+// transliteration of the Python, not a reimplementation from the
+// docstring summary alone.
+function computeJointTorques(jointsList, baseHeightMm, jointAnglesDeg, linkMassesG, payloadMassG) {
+  payloadMassG = payloadMassG || {};
+  const transforms = forwardKinematics(jointsList, baseHeightMm, jointAnglesDeg);
+  const baseTransform = mat4Identity();
+  baseTransform[11] = baseHeightMm;
+  const byName = {};
+  for (const j of jointsList) byName[j.name] = j;
+
+  function jointWorldPos(name) {
+    return worldPosition(transforms[name]);
+  }
+
+  // { anchor, point (world mm, array3), massKg } for every link + payload.
+  const linkLoads = [];
+  for (const joint of jointsList) {
+    const parentPos = joint.parent !== null ? jointWorldPos(joint.parent) : worldPosition(baseTransform);
+    const thisPos = jointWorldPos(joint.name);
+    const massKg = (linkMassesG[joint.name] || 0) / 1000.0;
+    if (joint.parent !== null) {
+      // root's own "link into it" has no governing joint
+      const midpoint = [(parentPos[0] + thisPos[0]) / 2, (parentPos[1] + thisPos[1]) / 2, (parentPos[2] + thisPos[2]) / 2];
+      linkLoads.push({ anchor: joint.parent, point: midpoint, massKg });
+    }
+
+    if (joint.end_effector_name) {
+      const eePos = jointWorldPos(joint.end_effector_name);
+      const eeMassKg = (linkMassesG[joint.end_effector_name + "_link"] || 0) / 1000.0;
+      const eeMidpoint = [(thisPos[0] + eePos[0]) / 2, (thisPos[1] + eePos[1]) / 2, (thisPos[2] + eePos[2]) / 2];
+      linkLoads.push({ anchor: joint.name, point: eeMidpoint, massKg: eeMassKg });
+
+      const payloadKg = (payloadMassG[joint.end_effector_name] || 0) / 1000.0;
+      if (payloadKg) {
+        linkLoads.push({ anchor: joint.name, point: eePos, massKg: payloadKg });
+      }
+    }
+  }
+
+  // { anchor, point, massKg } for every joint's own motor+gearbox.
+  const motorLoads = [];
+  for (const joint of jointsList) {
+    const motorMassKg = MOTOR_SPECS[joint.motor].weight_g / 1000.0;
+    motorLoads.push({ anchor: joint.name, point: jointWorldPos(joint.name), massKg: motorMassKg });
+  }
+
+  const allLoads = linkLoads.concat(motorLoads);
+
+  const torques = {};
+  for (const joint of jointsList) {
+    const qPos = jointWorldPos(joint.name);
+    const axisWorld = jointAxisWorld(joint, transforms, baseTransform);
+
+    let total = 0;
+    for (const load of allLoads) {
+      if (!ancestorChainInclusive(byName, load.anchor).has(joint.name)) continue;
+      const rM = [
+        (load.point[0] - qPos[0]) / 1000,
+        (load.point[1] - qPos[1]) / 1000,
+        (load.point[2] - qPos[2]) / 1000,
+      ];
+      const force = [0, 0, -load.massKg * GRAVITY_M_S2];
+      total += vecDot3(vecCross3(rM, force), axisWorld);
+    }
+    torques[joint.name] = total;
+  }
+  return torques;
+}
+
+// Mirrors dynamics.py::torque_margin.
+function torqueMargin(jointsList, torquesNm) {
+  const margins = {};
+  for (const joint of jointsList) {
+    const spec = MOTOR_SPECS[joint.motor];
+    const torqueNm = torquesNm[joint.name];
+    const absTorque = Math.abs(torqueNm);
+    margins[joint.name] = {
+      torque_nm: torqueNm,
+      rated_torque_nm: spec.rated_torque_nm,
+      stall_torque_nm: spec.stall_torque_nm,
+      pct_of_rated: (absTorque / spec.rated_torque_nm) * 100.0,
+      pct_of_stall: (absTorque / spec.stall_torque_nm) * 100.0,
+    };
+  }
+  return margins;
 }
 
 /* =====================================================================
@@ -1424,6 +1712,16 @@ function render() {
   // head: same exact FK "head" end-effector point as before -- just a much
   // bigger decorative sphere rendered there (see Section 4 comment).
   head.position.copy(pHead);
+
+  // torque/payload dashboard (M5, Section 7D) -- recomputed on every
+  // render() call, same as everything else above, so it stays live
+  // through pose changes, motion playback, and design-parameter edits
+  // alike. updateTorqueDisplay is a function DECLARATION (hoisted) that
+  // isn't actually defined until Section 7D, well below this function --
+  // safe because, like every other forward reference in this file,
+  // render() itself is never CALLED until the whole script (Section 7D
+  // included) has finished running.
+  updateTorqueDisplay();
 }
 
 /* =====================================================================
@@ -1516,6 +1814,7 @@ const thicknessInputs = {}; // main (incoming) link thickness, from makeValidate
 const eeThicknessInputs = {}; // end-effector link thickness (leaf joints only)
 const thicknessHintEls = {}; // clickable "recommended thickness" hint buttons
 const eeThicknessHintEls = {};
+const torqueFieldEls = {}; // { [jointName]: { pill, text } }, per-joint torque display (M5, Section 7D)
 
 // Briefly flags a rejected/invalid detail-panel edit with an error style,
 // then clears it -- used so a rejected input doesn't just silently look
@@ -1674,6 +1973,27 @@ function buildJointAccordion(j) {
     field.appendChild(label);
     body.appendChild(field);
     return field;
+  }
+
+  // estimated static gravity torque (M5) -- read-only, live-updated from
+  // render() (see updateTorqueDisplay, Section 7D). Placed FIRST, ahead of
+  // the design-parameter fields below, since it's the "payoff" number a
+  // user expanding this joint most wants to see first, with the fields
+  // that actually influence it (link length/thickness, motor, mount
+  // rotation) right underneath for immediate cause-and-effect.
+  {
+    const field = addField("推定トルク");
+    const wrap = document.createElement("div");
+    wrap.className = "torque-field-wrap";
+    const pill = document.createElement("span");
+    pill.className = "torque-pill";
+    const text = document.createElement("span");
+    text.className = "torque-field-text";
+    text.textContent = "-- N·m";
+    wrap.appendChild(pill);
+    wrap.appendChild(text);
+    field.appendChild(wrap);
+    torqueFieldEls[j.name] = { pill, text };
   }
 
   // link length into this joint (skip waist_yaw: zero offset, no direction)
@@ -2384,6 +2704,16 @@ document.getElementById("reset-btn").addEventListener("click", () => {
       mountInputs[j.name].rz.setExternally(def.mount_rz_deg);
     }
   }
+  // Payload mass (M5, Section 7D) resets WITH the design parameters --
+  // see that section's header comment for why it's treated as a design
+  // parameter rather than user-authored content like the custom motion's
+  // keyframes (which this handler deliberately does NOT touch).
+  PAYLOAD_MASS_G.head = 0;
+  PAYLOAD_MASS_G.hand_l = 0;
+  PAYLOAD_MASS_G.hand_r = 0;
+  payloadInputs.head.setExternally(0);
+  payloadInputs.hand_l.setExternally(0);
+  payloadInputs.hand_r.setExternally(0);
   render();
 });
 
@@ -2709,7 +3039,137 @@ customImportBtn.addEventListener("click", () => {
 customExportArea.addEventListener("click", () => customExportArea.select());
 
 renderCustomKeyframeList(); // seed the empty-state placeholder + export text
-stopMotion(); // now safe: everything both this section and Section 7B need is initialized
+// NOTE: the initial stopMotion() call (which renders a frame, which calls
+// updateTorqueDisplay(), which reads PAYLOAD_MASS_G) is deferred to the
+// very end of Section 7D below, not made here -- same forward-reference
+// ordering issue as motionHintEl before it: PAYLOAD_MASS_G/payloadInputs/
+// torqueSummaryPillEls are declared with `const` in Section 7D, and
+// (unlike a `function` declaration) a `const` is NOT usable before its
+// own declaration actually executes, even though everything that reads
+// it is safe once the WHOLE script has finished running -- calling
+// stopMotion() here, before Section 7D's declarations exist, would hit
+// that TDZ and throw "Cannot access before initialization".
+
+/* =====================================================================
+ * SECTION 7D: TORQUE / PAYLOAD DISPLAY (M5)
+ * ---------------------------------------------------------------------
+ * Live dashboard over the Section 2B math: a compact 7-dot "at a glance"
+ * summary row up top, plus one detailed read-only field inside each
+ * joint's own accordion (torqueFieldEls, populated in buildJointAccordion
+ * above). Both are refreshed by updateTorqueDisplay(), called from the
+ * very end of render() (Section 5) -- so this updates on every pose
+ * slider drag, every motion-playback animation frame, and every design-
+ * parameter edit (length/thickness/motor/mount/axis), exactly like FK
+ * itself already does, with no separate update path to keep in sync.
+ *
+ * PAYLOAD_MASS_G is treated as a DESIGN PARAMETER, not user-authored
+ * content like the custom motion's keyframes: "デフォルトに戻す" resets
+ * it to 0/0/0 (see that handler below), same as it resets link length/
+ * thickness/motor/mount/axis. Rationale: a payload mass models a design
+ * choice ("what if the head assembly weighs 150g"), not an animation the
+ * user spent effort authoring -- losing it on reset is the same kind of
+ * "start over" a user already expects from that button for every other
+ * design knob, whereas losing custom keyframes would discard real work.
+ * ===================================================================== */
+
+const PAYLOAD_MASS_G = { head: 0, hand_l: 0, hand_r: 0 };
+
+const JOINT_SHORT_LABEL_JA = {
+  waist_yaw: "腰Y",
+  neck_yaw: "首Y",
+  neck_pitch: "首P",
+  shoulder_pitch_l: "肩L",
+  elbow_pitch_l: "肘L",
+  shoulder_pitch_r: "肩R",
+  elbow_pitch_r: "肘R",
+};
+
+// Thresholds per the M5 brief: green under 70% of rated, yellow from 70%
+// up to (not including) 100% of rated, red at/over rated, and a visually
+// distinct "stall" state (darker red + outline, see CSS) at/over 100% of
+// STALL torque -- since that means the motor physically cannot hold the
+// pose at all, a strictly more severe condition than merely exceeding
+// its continuous rating.
+function torqueStatus(pctOfRated, pctOfStall) {
+  if (pctOfStall >= 100) return "stall";
+  if (pctOfRated >= 100) return "over";
+  if (pctOfRated >= 70) return "warn";
+  return "ok";
+}
+
+function torqueStatusLabelJa(status) {
+  if (status === "stall") return "ストール超過";
+  if (status === "over") return "定格超過";
+  if (status === "warn") return "定格に接近";
+  return "余裕あり";
+}
+
+const payloadInputs = {};
+const payloadSlots = {
+  head: document.getElementById("payload-head-slot"),
+  hand_l: document.getElementById("payload-hand-l-slot"),
+  hand_r: document.getElementById("payload-hand-r-slot"),
+};
+for (const eeName of ["head", "hand_l", "hand_r"]) {
+  const field = makeValidatedNumberInput(0, 0, 20000, (v) => {
+    PAYLOAD_MASS_G[eeName] = v;
+  });
+  payloadSlots[eeName].appendChild(field.input);
+  payloadInputs[eeName] = field;
+}
+
+const torqueSummaryRowEl = document.getElementById("torque-summary-row");
+const torqueSummaryPillEls = {};
+for (const j of JOINTS) {
+  const item = document.createElement("div");
+  item.className = "torque-summary-item";
+  const pill = document.createElement("span");
+  pill.className = "torque-pill";
+  const label = document.createElement("span");
+  label.textContent = JOINT_SHORT_LABEL_JA[j.name] || j.name;
+  item.appendChild(pill);
+  item.appendChild(label);
+  torqueSummaryRowEl.appendChild(item);
+  torqueSummaryPillEls[j.name] = { pill, item };
+}
+
+// Recomputes link masses (from each joint's LIVE length/thickness),
+// static gravity torques (from the LIVE pose + mount rotation + axis +
+// motor selection), and torque margins, then paints both the summary
+// row and each accordion's detail field. Called from render() -- see
+// that function's own comment for why that's the single right place.
+function updateTorqueDisplay() {
+  const linkMasses = estimateAllLinkMasses(JOINTS);
+  const torques = computeJointTorques(JOINTS, BASE_HEIGHT_MM, currentAngles, linkMasses, PAYLOAD_MASS_G);
+  const margins = torqueMargin(JOINTS, torques);
+
+  for (const j of JOINTS) {
+    const m = margins[j.name];
+    const status = torqueStatus(m.pct_of_rated, m.pct_of_stall);
+    const statusJa = torqueStatusLabelJa(status);
+    const detailText =
+      m.torque_nm.toFixed(2) + " N·m (" + statusJa + ": 定格" + m.pct_of_rated.toFixed(0) + "% / ストール" + m.pct_of_stall.toFixed(0) + "%)";
+
+    const detailEl = torqueFieldEls[j.name];
+    if (detailEl) {
+      detailEl.pill.className = "torque-pill " + status;
+      detailEl.text.textContent = detailText;
+    }
+
+    const summaryEl = torqueSummaryPillEls[j.name];
+    if (summaryEl) {
+      summaryEl.pill.className = "torque-pill " + status;
+      summaryEl.item.title = j.part_ja + " (" + j.name + "): " + detailText;
+    }
+  }
+}
+
+// Deferred here from the end of Section 7C (see the NOTE left there):
+// this is the initial stopMotion() call that seeds the pose/progress/
+// button state for the default-selected motion, now safe to run since
+// every top-level const it transitively touches (through render() ->
+// updateTorqueDisplay()) is finally initialized.
+stopMotion();
 
 /* =====================================================================
  * SECTION 8: RESIZE + RENDER LOOP
