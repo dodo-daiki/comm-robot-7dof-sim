@@ -2478,6 +2478,27 @@ const SAMPLE_MOTIONS = {
       { time_s: 2.8, angles: { neck_yaw: 0 } },
     ],
   },
+  // Deliberately the "no" counterpart to nod's "yes": same single joint
+  // (neck_yaw) as look_around, but SMALLER amplitude (25 deg vs. 45) and
+  // MUCH faster tempo (0.15s per half-swing vs. look_around's 0.7s -- a
+  // ~4.7x pace difference) so it reads as a quick, tight headshake rather
+  // than a slow wide "scanning the room" sweep. 3 full swings
+  // (0 -> -25 -> 25 -> -25 -> 25 -> -25 -> 0) land inside 1.05s, well
+  // under the "under 2 seconds" target.
+  shake_no: {
+    label_ja: "いいえ",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.15, angles: { neck_yaw: -25 } },
+      { time_s: 0.3, angles: { neck_yaw: 25 } },
+      { time_s: 0.45, angles: { neck_yaw: -25 } },
+      { time_s: 0.6, angles: { neck_yaw: 25 } },
+      { time_s: 0.75, angles: { neck_yaw: -25 } },
+      { time_s: 0.9, angles: { neck_yaw: 25 } },
+      { time_s: 1.05, angles: { neck_yaw: 0 } },
+    ],
+  },
   // Raises the left arm via shoulder_pitch_l (positive angle sweeps the
   // upper arm forward-then-up -- see the axis-direction note below), then
   // oscillates elbow_pitch_l a few times while the shoulder HOLDS raised,
@@ -2507,6 +2528,41 @@ const SAMPLE_MOTIONS = {
       { time_s: 2.8, angles: { shoulder_pitch_l: 0, elbow_pitch_l: 0 } },
     ],
   },
+  // Both arms raised together (unlike wave, which is a single-arm
+  // oscillation) to near the top of shoulder_pitch's range (145 of a
+  // 150 max), elbows only slightly bent (10 deg, near-straight/
+  // "extended") for a joyful "arms up" pose. A brief plateau
+  // (0.5s -> 1.0s, same values repeated -- the sparse-keyframe "hold"
+  // idiom used throughout this file) plus a subtle +15 deg neck_pitch
+  // upward tilt at the peak add a bit of extra expressiveness before
+  // lowering back to neutral.
+  banzai: {
+    label_ja: "万歳",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.5, angles: { shoulder_pitch_l: 145, shoulder_pitch_r: 145, elbow_pitch_l: 10, elbow_pitch_r: 10, neck_pitch: 15 } },
+      { time_s: 1.0, angles: { shoulder_pitch_l: 145, shoulder_pitch_r: 145, elbow_pitch_l: 10, elbow_pitch_r: 10, neck_pitch: 15 } },
+      { time_s: 1.6, angles: { shoulder_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_l: 0, elbow_pitch_r: 0, neck_pitch: 0 } },
+    ],
+  },
+  // Right arm (shoulder_pitch_r/elbow_pitch_r) raised toward the head
+  // (shoulder 70, elbow 110 -- roughly a hand-near-chin pose), combined
+  // with a slight neck_pitch/neck_yaw tilt as if gazing off in thought,
+  // then held for a full 3 seconds (3.7 - 0.7) -- much longer than any
+  // other motion's plateau (contrast bow's 0.3s hold) -- since this is a
+  // "considering" pose rather than a quick gesture, before a return to
+  // neutral.
+  thinking: {
+    label_ja: "考え中",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.7, angles: { shoulder_pitch_r: 70, elbow_pitch_r: 110, neck_pitch: 10, neck_yaw: 18 } },
+      { time_s: 3.7, angles: { shoulder_pitch_r: 70, elbow_pitch_r: 110, neck_pitch: 10, neck_yaw: 18 } },
+      { time_s: 4.3, angles: { shoulder_pitch_r: 0, elbow_pitch_r: 0, neck_pitch: 0, neck_yaw: 0 } },
+    ],
+  },
   // Primarily a neck_pitch forward dip, plus a small synchronized forward
   // shoulder_pitch_l/r motion on both arms for a bit more "whole-body"
   // greeting feel -- this is an approximation, since there's no waist
@@ -2519,6 +2575,47 @@ const SAMPLE_MOTIONS = {
       { time_s: 0.4, angles: { neck_pitch: -15, shoulder_pitch_l: 12, shoulder_pitch_r: 12 } },
       { time_s: 0.7, angles: { neck_pitch: -15, shoulder_pitch_l: 12, shoulder_pitch_r: 12 } },
       { time_s: 1.1, angles: { neck_pitch: 0, shoulder_pitch_l: 0, shoulder_pitch_r: 0 } },
+    ],
+  },
+  // A startled recoil. The whole point is the SPEED CONTRAST: the initial
+  // snap (0.0 -> 0.12) reaches its full extreme in just 0.12s -- roughly
+  // 3x faster than nod's fastest transition (0.25s) and ~10x faster than
+  // this same motion's own recovery leg below -- while the settle back to
+  // neutral (0.22 -> 1.4, 1.18s) is comparatively slow. neck_pitch snaps
+  // to a sharp backward/up tilt (35 of a 45 max); both shoulders pull
+  // toward negative (-12, i.e. away from their positive "forward" sense)
+  // since there's no roll/yaw DOF to flinch sideways with; a slight
+  // elbow_pitch bend (20) reads as a small defensive flinch. A short
+  // plateau (0.12 -> 0.22) lets the startled pose register before the
+  // slow recovery begins.
+  surprise: {
+    label_ja: "びっくり",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 0.12, angles: { neck_pitch: 35, shoulder_pitch_l: -12, shoulder_pitch_r: -12, elbow_pitch_l: 20, elbow_pitch_r: 20 } },
+      { time_s: 0.22, angles: { neck_pitch: 35, shoulder_pitch_l: -12, shoulder_pitch_r: -12, elbow_pitch_l: 20, elbow_pitch_r: 20 } },
+      { time_s: 1.4, angles: { neck_pitch: 0, shoulder_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_l: 0, elbow_pitch_r: 0 } },
+    ],
+  },
+  // The opposite quality from surprise above: SLOW and heavy throughout,
+  // and visibly slower/longer than bow (a quick polite dip) despite both
+  // being downward neck_pitch motions. neck_pitch droops to -28 (near the
+  // -30 limit, not touching it, per the "stay inside default range_deg"
+  // requirement) over a full 1.8s (vs. bow's 0.4s dip), both shoulders
+  // sag forward-down slightly (15) with a matching slight elbow bend
+  // (10) for a limp-armed look, holds the slumped pose for 2s (3.8s of
+  // dwell before recovery even begins), then a slow 2s return to
+  // neutral. Total duration (5.8s) is by far the longest one-shot motion
+  // in this library, which is itself part of selling "heavy/deflated".
+  dejected: {
+    label_ja: "しょんぼり",
+    loop: false,
+    keyframes: [
+      { time_s: 0.0, angles: { waist_yaw: 0, neck_yaw: 0, neck_pitch: 0, shoulder_pitch_l: 0, elbow_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_r: 0 } },
+      { time_s: 1.8, angles: { neck_pitch: -28, shoulder_pitch_l: 15, shoulder_pitch_r: 15, elbow_pitch_l: 10, elbow_pitch_r: 10 } },
+      { time_s: 3.8, angles: { neck_pitch: -28, shoulder_pitch_l: 15, shoulder_pitch_r: 15, elbow_pitch_l: 10, elbow_pitch_r: 10 } },
+      { time_s: 5.8, angles: { neck_pitch: 0, shoulder_pitch_l: 0, shoulder_pitch_r: 0, elbow_pitch_l: 0, elbow_pitch_r: 0 } },
     ],
   },
   // Loops indefinitely (see `loop: true`). The LAST keyframe's angles
@@ -2540,7 +2637,7 @@ const SAMPLE_MOTIONS = {
 };
 
 // The user-authored 6th "motion", edited at runtime by the Section 7C
-// custom motion editor (unlike the 5 frozen presets above, which are
+// custom motion editor (unlike the 10 frozen presets above, which are
 // never mutated). Starts empty; the editor pushes/removes/reorders
 // entries in its `keyframes` array directly. Deliberately a SEPARATE
 // statement from the SAMPLE_MOTIONS literal above (not just another key
@@ -2551,10 +2648,10 @@ SAMPLE_MOTIONS.custom = {
   keyframes: [],
 };
 
-const MOTION_ORDER = ["nod", "look_around", "wave", "bow", "idle", "custom"];
+const MOTION_ORDER = ["nod", "shake_no", "look_around", "wave", "banzai", "thinking", "bow", "surprise", "dejected", "idle", "custom"];
 
 // Longest time_s across a motion's keyframes -- NOT motion.keyframes'
-// last array element's time_s, since (unlike the 5 presets, which are
+// last array element's time_s, since (unlike the 10 presets, which are
 // always authored in chronological order) the custom motion's keyframes
 // array can be mutated in any order by the editor. Also safe for an
 // empty keyframes array (the custom motion before its first capture),
@@ -2885,8 +2982,8 @@ document.getElementById("reset-btn").addEventListener("click", () => {
 /* =====================================================================
  * SECTION 7C: CUSTOM MOTION EDITOR (M4.1)
  * ---------------------------------------------------------------------
- * Lets the user hand-author a 6th motion (SAMPLE_MOTIONS.custom, wired
- * into the exact same playback engine/UI as the 5 presets above -- see
+ * Lets the user hand-author an 11th motion (SAMPLE_MOTIONS.custom, wired
+ * into the exact same playback engine/UI as the 10 presets above -- see
  * MOTION_ORDER) by capturing the CURRENT pose (all 7 joint angles at
  * once, from currentAngles -- the same source the sliders themselves
  * read from, so a keyframe is naturally a full multi-axis snapshot, not
