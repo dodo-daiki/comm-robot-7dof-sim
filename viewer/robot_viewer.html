@@ -3672,6 +3672,7 @@ function updateWeightHints() {
   clavicleThicknessInput = t.thickness;
   addWeightField(p, "shoulder_pitch_l", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm), JOINTS_BY_NAME.shoulder_pitch_l.link_thickness_mm), "左肩取付部 重量 (g)");
   addWeightField(p, "shoulder_pitch_r", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm), JOINTS_BY_NAME.shoulder_pitch_r.link_thickness_mm), "右肩取付部 重量 (g)");
+  p.addInfoRow("以下は肩関節(左/右)の取付角度です。肩関節の向きに影響します。");
   addMountAngleField(p, JOINTS_BY_NAME.shoulder_pitch_l, "左肩 取付角度 (deg)");
   addMountAngleField(p, JOINTS_BY_NAME.shoulder_pitch_r, "右肩 取付角度 (deg)");
 }
