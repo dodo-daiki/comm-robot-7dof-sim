@@ -602,6 +602,24 @@
     </div>
   </details>
 
+  <details class="custom-io-details">
+    <summary>設計をエクスポート/インポート（関節・骨格パーツ・全設定）</summary>
+    <div class="custom-io-body">
+      <p class="subtitle">上の「カスタム動作」のエクスポートとは別に、関節の可動範囲・モーター・回転軸・取付角度、骨格パーツの寸法・重量、頭部/手のサイズ、ペイロード、（あれば）カスタム動作までをまとめて1つのJSONとして書き出し/読み込みできます。</p>
+      <button id="design-export-btn" type="button" class="custom-full-btn">エクスポート</button>
+      <span class="field-label">エクスポート結果（コピーして保存してください）</span>
+      <textarea id="design-export-area" class="custom-io-textarea" readonly rows="6"></textarea>
+      <span class="field-label">インポート（JSONを貼り付け。一部のセクションだけでも読み込めます）</span>
+      <textarea id="design-import-area" class="custom-io-textarea" rows="6" placeholder='{"schema":"comm-robot-7dof-sim-design-v1","joints":{...},"parts":{...}}'></textarea>
+      <button id="design-import-btn" type="button" class="custom-full-btn">読み込む</button>
+      <div id="design-import-message" class="custom-kf-message" hidden></div>
+      <button id="design-share-btn" type="button" class="custom-full-btn">共有リンクをコピー</button>
+      <span class="field-label">共有URL（自動コピーが効かない場合はここから選択してコピーしてください）</span>
+      <textarea id="design-share-url-area" class="custom-io-textarea" readonly rows="3"></textarea>
+      <div id="design-share-message" class="custom-kf-message" hidden></div>
+    </div>
+  </details>
+
   <h2 class="section-heading">トルク・負荷</h2>
   <p class="subtitle">現在のポーズで各関節モーターにかかる推定重力トルクです。緑=定格の70%未満、黄=定格に接近、赤=定格超過、濃赤=ストール超過(そのポーズを保持不可)。「骨格パーツ」の寸法・重量や「関節」のモーター・ポーズを変えるたびに再計算されます。ペイロード(持ち物)は「骨格パーツ」の頭部/手の各項目にあります。</p>
   <div id="torque-summary-row" class="torque-summary-row"></div>
@@ -3775,8 +3793,592 @@ for (const [side, eeName, label] of [["l", "hand_l", "手 (左, hand L)"], ["r",
 stopMotion(); // now safe: PAYLOAD_MASS_G and every other M6 top-level const above is initialized
 
 /* =====================================================================
- * SECTION 8: RESIZE + RENDER LOOP
+ * SECTION 7F: FULL DESIGN EXPORT / IMPORT / SHARE LINK (M8)
+ * ---------------------------------------------------------------------
+ * A SUPERSET of the Section 7C custom-motion-only export/import above:
+ * this one captures the whole design (every joint's axis/range/motor/
+ * mount angle/thickness/length, every「骨格パーツ」weight override, head/
+ * hand size, payload masses) PLUS, optionally, the custom motion, as one
+ * JSON blob -- so a collaborator can reproduce the entire skeleton
+ * config, not just an animation. The Section 7C mechanism is left
+ * completely untouched; this is an additional, separate section.
+ *
+ * Placed here (after Section 7E, not earlier) because every piece of
+ * state and every *Inputs/*Components map this section reads or writes
+ * (weightOverrideComponents, handOwnMassInputs, clavicleThicknessInput,
+ * headSizeInput, handSizeInputs, payloadInputs, PART_WEIGHT_OVERRIDE_G,
+ * HAND_OWN_MASS_G, CLAVICLE_THICKNESS_MM, HEAD_RADIUS_MM, HAND_RADIUS_MM,
+ * PAYLOAD_MASS_G) is only fully populated once Section 7E has finished
+ * running -- same TDZ/ordering reasoning documented at the top of that
+ * section and at the end of Section 7C.
+ *
+ * SCHEMA ("comm-robot-7dof-sim-design-v1"): field names mirror the real
+ * internal data structures directly (see Section 3B/7E) rather than
+ * inventing a parallel vocabulary --
+ *   joints[name]: { axis, range_deg, motor, mount_rx_deg, mount_ry_deg,
+ *     mount_rz_deg, length_mm, link_thickness_mm, end_effector_length_mm,
+ *     end_effector_thickness_mm } -- length_mm/end_effector_length_mm are
+ *     the vecLen() of origin_offset_mm/end_effector_offset_mm (the
+ *     quantity the UI itself edits via setLinkLength/setEndEffectorLength
+ *     -- NOT the raw offset vector, since only the MAGNITUDE is user-
+ *     editable, direction is fixed per ORIGIN_OFFSET_DIRECTIONS). Fields
+ *     absent on a given joint (e.g. waist_yaw has no length_mm) are
+ *     simply omitted, never emitted as null.
+ *   parts: { weight_override_g, hand_own_mass_g, clavicle_thickness_mm }
+ *     -- straight mirror of PART_WEIGHT_OVERRIDE_G/HAND_OWN_MASS_G/
+ *     CLAVICLE_THICKNESS_MM.
+ *   head: { radius_mm }, hands: { l: { radius_mm }, r: { radius_mm } },
+ *     payload_mass_g: { head, hand_l, hand_r } -- mirrors HEAD_RADIUS_MM/
+ *     HAND_RADIUS_MM/PAYLOAD_MASS_G.
+ *   custom_motion: same { name, keyframes } shape Section 7C already
+ *     exports, or null if there are no keyframes to include.
+ *
+ * VALIDATION/IMPORT MODEL: parseAndValidateFullDesignJSON() below is the
+ * ONE shared validator for both the textarea import button and the share-
+ * link auto-load on page load (never duplicated). Every top-level section
+ * is OPTIONAL -- only sections actually present in the pasted JSON are
+ * validated and returned, so pasting e.g. just {"joints": {...}} leaves
+ * parts/head/hands/payload_mass_g/custom_motion completely untouched
+ * (the "graceful/partial import" requirement). Within a single import,
+ * though, validation is all-or-nothing across the WHOLE blob: if ANYTHING
+ * anywhere is malformed, the entire import is rejected with one friendly
+ * error and NOTHING is applied, so a successful (partial or full) import
+ * can never leave state half-updated. custom_motion validation reuses
+ * parseAndValidateCustomMotionJSON() (Section 7C) directly rather than a
+ * second parallel implementation.
+ *
+ * Every "which keys are legal here" check is done by testing a user-
+ * supplied key against a closed whitelist (KNOWN_JOINT_NAMES,
+ * WEIGHT_OVERRIDE_KEYS, or a literal ["l","r"]/["head","hand_l","hand_r"]
+ * list) BEFORE that key is ever used to read or write anything -- the
+ * same discipline parseAndValidateCustomMotionJSON already uses for
+ * keyframe angle names. This is also what makes a hostile
+ * "__proto__"/"constructor" key harmless: JSON.parse defines such a key
+ * as a genuine OWN data property (it does NOT trigger the Object.prototype
+ * __proto__ exotic setter -- that's an object-LITERAL-syntax-only
+ * behavior), so it shows up in Object.keys() like any other string and
+ * simply fails the whitelist check like any other unknown name, with no
+ * special-casing needed.
  * ===================================================================== */
+
+const designExportArea = document.getElementById("design-export-area");
+const designExportBtn = document.getElementById("design-export-btn");
+const designImportArea = document.getElementById("design-import-area");
+const designImportBtn = document.getElementById("design-import-btn");
+const designImportMessageEl = document.getElementById("design-import-message");
+const designShareBtn = document.getElementById("design-share-btn");
+const designShareUrlArea = document.getElementById("design-share-url-area");
+const designShareMessageEl = document.getElementById("design-share-message");
+
+// Every joint name the app actually knows about, and every key
+// PART_WEIGHT_OVERRIDE_G can legally carry (exactly the keys
+// weightOverrideComponents ended up with once Section 7E finished
+// building the panel -- i.e. exactly the weight fields that actually
+// exist in the UI: neck_yaw/shoulder_pitch_l/shoulder_pitch_r/neck_pitch/
+// head_link/elbow_pitch_l/elbow_pitch_r. hand_l_link/hand_r_link are a
+// real key estimateAllLinkMasses can produce, but Section 7E deliberately
+// gives them no weight-override UI of their own -- see that section's
+// "前腕" comment -- so they're excluded here too, keeping export/import
+// exactly as faithful to the real editable surface as the rest of this
+// file.
+const KNOWN_JOINT_NAMES = new Set(JOINTS.map((j) => j.name));
+const WEIGHT_OVERRIDE_KEYS = new Set(Object.keys(weightOverrideComponents));
+
+function isFiniteNumber(v) {
+  return typeof v === "number" && isFinite(v);
+}
+function clampNum(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v));
+}
+// Only the 3 axis-aligned unit vectors the rotation-axis <select> can
+// ever produce (see labelToAxis) are valid -- returns a fresh array, or
+// null if `v` isn't exactly one of them.
+function validateAxis(v) {
+  if (!Array.isArray(v) || v.length !== 3 || !v.every(isFiniteNumber)) return null;
+  const key = v.join(",");
+  if (key === "1,0,0") return [1, 0, 0];
+  if (key === "0,1,0") return [0, 1, 0];
+  if (key === "0,0,1") return [0, 0, 1];
+  return null;
+}
+
+function collectFullDesignState() {
+  const joints = {};
+  for (const j of JOINTS) {
+    const entry = {
+      axis: j.axis.slice(),
+      range_deg: j.range_deg.slice(),
+      motor: j.motor,
+      mount_rx_deg: j.mount_rx_deg,
+      mount_ry_deg: j.mount_ry_deg,
+      mount_rz_deg: j.mount_rz_deg,
+    };
+    if (ORIGIN_OFFSET_DIRECTIONS[j.name]) {
+      entry.length_mm = Math.round(vecLen(j.origin_offset_mm) * 100) / 100;
+    }
+    if (j.link_thickness_mm !== undefined) entry.link_thickness_mm = j.link_thickness_mm;
+    if (j.end_effector_offset_mm) {
+      entry.end_effector_length_mm = Math.round(vecLen(j.end_effector_offset_mm) * 100) / 100;
+    }
+    if (j.end_effector_thickness_mm !== undefined) entry.end_effector_thickness_mm = j.end_effector_thickness_mm;
+    joints[j.name] = entry;
+  }
+
+  const parts = {
+    weight_override_g: { ...PART_WEIGHT_OVERRIDE_G },
+    hand_own_mass_g: { hand_l: HAND_OWN_MASS_G.hand_l, hand_r: HAND_OWN_MASS_G.hand_r },
+    clavicle_thickness_mm: CLAVICLE_THICKNESS_MM,
+  };
+  const head = { radius_mm: HEAD_RADIUS_MM };
+  const hands = { l: { radius_mm: HAND_RADIUS_MM.l }, r: { radius_mm: HAND_RADIUS_MM.r } };
+  const payload_mass_g = { head: PAYLOAD_MASS_G.head, hand_l: PAYLOAD_MASS_G.hand_l, hand_r: PAYLOAD_MASS_G.hand_r };
+
+  const customMotion =
+    SAMPLE_MOTIONS.custom.keyframes.length > 0
+      ? { name: "カスタム動作", keyframes: SAMPLE_MOTIONS.custom.keyframes.map((k) => ({ time_s: k.time_s, angles: { ...k.angles } })) }
+      : null;
+
+  return {
+    schema: "comm-robot-7dof-sim-design-v1",
+    joints,
+    parts,
+    head,
+    hands,
+    payload_mass_g,
+    custom_motion: customMotion,
+  };
+}
+
+// See the Section 7F header comment above for the full validation model.
+// Never throws; always returns { result: {...} } (only the sections that
+// were actually present, fully validated + clamped) or { error: "..." }.
+function parseAndValidateFullDesignJSON(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return { error: "JSONとして読み取れませんでした。形式を確認してください。" };
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { error: "オブジェクト形式が必要です。" };
+  }
+  const TOP_KEYS = ["joints", "parts", "head", "hands", "payload_mass_g", "custom_motion"];
+  const hasAny = TOP_KEYS.some((k) => Object.prototype.hasOwnProperty.call(data, k));
+  if (!hasAny) {
+    if (Array.isArray(data.keyframes)) {
+      return { error: "これは動作データのようです。「カスタム動作を作成」内のインポート欄をお使いください。" };
+    }
+    return { error: "joints/parts/head/hands/payload_mass_g/custom_motion のいずれも見つかりません。" };
+  }
+
+  const result = {};
+
+  // ---- joints ----
+  if (Object.prototype.hasOwnProperty.call(data, "joints")) {
+    const src = data.joints;
+    if (!src || typeof src !== "object" || Array.isArray(src)) {
+      return { error: "\"joints\" はオブジェクト形式が必要です。" };
+    }
+    const joints = {};
+    for (const name of Object.keys(src)) {
+      if (!KNOWN_JOINT_NAMES.has(name)) {
+        return { error: "不明な関節名 \"" + name + "\"。" };
+      }
+      const jd = src[name];
+      if (!jd || typeof jd !== "object" || Array.isArray(jd)) {
+        return { error: "関節 \"" + name + "\": 形式が不正です。" };
+      }
+      const joint = JOINTS_BY_NAME[name];
+      const entry = {};
+      if (jd.axis !== undefined) {
+        const axis = validateAxis(jd.axis);
+        if (!axis) return { error: "関節 \"" + name + "\": axis はX/Y/Zいずれかの単位ベクトルが必要です。" };
+        entry.axis = axis;
+      }
+      if (jd.range_deg !== undefined) {
+        if (!Array.isArray(jd.range_deg) || jd.range_deg.length !== 2 || !jd.range_deg.every(isFiniteNumber)) {
+          return { error: "関節 \"" + name + "\": range_deg が不正です。" };
+        }
+        const lo = clampNum(jd.range_deg[0], -360, 360);
+        const hi = clampNum(jd.range_deg[1], -360, 360);
+        if (lo >= hi) {
+          return { error: "関節 \"" + name + "\": range_deg は最小値 < 最大値である必要があります。" };
+        }
+        entry.range_deg = [lo, hi];
+      }
+      if (jd.motor !== undefined) {
+        if (typeof jd.motor !== "string" || !MOTOR_SPECS[jd.motor]) {
+          return { error: "関節 \"" + name + "\": 不明なモーター機種 \"" + jd.motor + "\"。" };
+        }
+        entry.motor = jd.motor;
+      }
+      for (const key of ["mount_rx_deg", "mount_ry_deg", "mount_rz_deg"]) {
+        if (jd[key] !== undefined) {
+          if (!isFiniteNumber(jd[key])) return { error: "関節 \"" + name + "\": " + key + " が数値ではありません。" };
+          entry[key] = clampNum(jd[key], -180, 180);
+        }
+      }
+      if (jd.length_mm !== undefined) {
+        if (!isFiniteNumber(jd.length_mm) || jd.length_mm <= 0) return { error: "関節 \"" + name + "\": length_mm が不正です。" };
+        if (!ORIGIN_OFFSET_DIRECTIONS[name]) return { error: "関節 \"" + name + "\": length_mm を持たない関節です。" };
+        entry.length_mm = clampNum(jd.length_mm, 1, 2000);
+      }
+      if (jd.link_thickness_mm !== undefined) {
+        if (!isFiniteNumber(jd.link_thickness_mm)) return { error: "関節 \"" + name + "\": link_thickness_mm が数値ではありません。" };
+        if (joint.link_thickness_mm === undefined) return { error: "関節 \"" + name + "\": link_thickness_mm を持たない関節です。" };
+        entry.link_thickness_mm = clampNum(jd.link_thickness_mm, 5, 300);
+      }
+      if (jd.end_effector_length_mm !== undefined) {
+        if (!isFiniteNumber(jd.end_effector_length_mm) || jd.end_effector_length_mm <= 0) {
+          return { error: "関節 \"" + name + "\": end_effector_length_mm が不正です。" };
+        }
+        if (!joint.end_effector_name) return { error: "関節 \"" + name + "\": end_effector_length_mm を持たない関節です。" };
+        entry.end_effector_length_mm = clampNum(jd.end_effector_length_mm, 1, 2000);
+      }
+      if (jd.end_effector_thickness_mm !== undefined) {
+        if (!isFiniteNumber(jd.end_effector_thickness_mm)) {
+          return { error: "関節 \"" + name + "\": end_effector_thickness_mm が数値ではありません。" };
+        }
+        if (joint.end_effector_thickness_mm === undefined) return { error: "関節 \"" + name + "\": end_effector_thickness_mm を持たない関節です。" };
+        entry.end_effector_thickness_mm = clampNum(jd.end_effector_thickness_mm, 5, 300);
+      }
+      joints[name] = entry;
+    }
+    result.joints = joints;
+  }
+
+  // ---- parts ----
+  if (Object.prototype.hasOwnProperty.call(data, "parts")) {
+    const src = data.parts;
+    if (!src || typeof src !== "object" || Array.isArray(src)) {
+      return { error: "\"parts\" はオブジェクト形式が必要です。" };
+    }
+    const parts = {};
+    if (src.weight_override_g !== undefined) {
+      if (!src.weight_override_g || typeof src.weight_override_g !== "object" || Array.isArray(src.weight_override_g)) {
+        return { error: "\"parts.weight_override_g\" はオブジェクト形式が必要です。" };
+      }
+      const wo = {};
+      for (const key of Object.keys(src.weight_override_g)) {
+        if (!WEIGHT_OVERRIDE_KEYS.has(key)) {
+          return { error: "不明な重量オーバーライドのキー \"" + key + "\"。" };
+        }
+        const v = src.weight_override_g[key];
+        if (v === null) {
+          wo[key] = null;
+          continue;
+        }
+        if (!isFiniteNumber(v) || v < 0) return { error: "重量オーバーライド \"" + key + "\" が不正です。" };
+        wo[key] = clampNum(v, 0, 50000);
+      }
+      parts.weight_override_g = wo;
+    }
+    if (src.hand_own_mass_g !== undefined) {
+      if (!src.hand_own_mass_g || typeof src.hand_own_mass_g !== "object" || Array.isArray(src.hand_own_mass_g)) {
+        return { error: "\"parts.hand_own_mass_g\" はオブジェクト形式が必要です。" };
+      }
+      const hom = {};
+      for (const key of ["hand_l", "hand_r"]) {
+        if (Object.prototype.hasOwnProperty.call(src.hand_own_mass_g, key)) {
+          const v = src.hand_own_mass_g[key];
+          if (!isFiniteNumber(v) || v < 0) return { error: "hand_own_mass_g." + key + " が不正です。" };
+          hom[key] = clampNum(v, 0, 20000);
+        }
+      }
+      parts.hand_own_mass_g = hom;
+    }
+    if (src.clavicle_thickness_mm !== undefined) {
+      if (!isFiniteNumber(src.clavicle_thickness_mm)) return { error: "\"parts.clavicle_thickness_mm\" が数値ではありません。" };
+      parts.clavicle_thickness_mm = clampNum(src.clavicle_thickness_mm, 5, 300);
+    }
+    result.parts = parts;
+  }
+
+  // ---- head ----
+  if (Object.prototype.hasOwnProperty.call(data, "head")) {
+    const src = data.head;
+    if (!src || typeof src !== "object" || Array.isArray(src)) return { error: "\"head\" はオブジェクト形式が必要です。" };
+    const head = {};
+    if (src.radius_mm !== undefined) {
+      if (!isFiniteNumber(src.radius_mm)) return { error: "\"head.radius_mm\" が数値ではありません。" };
+      head.radius_mm = clampNum(src.radius_mm, 20, 300);
+    }
+    result.head = head;
+  }
+
+  // ---- hands ----
+  if (Object.prototype.hasOwnProperty.call(data, "hands")) {
+    const src = data.hands;
+    if (!src || typeof src !== "object" || Array.isArray(src)) return { error: "\"hands\" はオブジェクト形式が必要です。" };
+    const hands = {};
+    for (const side of ["l", "r"]) {
+      if (Object.prototype.hasOwnProperty.call(src, side)) {
+        const sd = src[side];
+        if (!sd || typeof sd !== "object" || Array.isArray(sd)) return { error: "\"hands." + side + "\" はオブジェクト形式が必要です。" };
+        if (sd.radius_mm !== undefined) {
+          if (!isFiniteNumber(sd.radius_mm)) return { error: "hands." + side + ".radius_mm が数値ではありません。" };
+          hands[side] = { radius_mm: clampNum(sd.radius_mm, 15, 200) };
+        }
+      }
+    }
+    result.hands = hands;
+  }
+
+  // ---- payload_mass_g ----
+  if (Object.prototype.hasOwnProperty.call(data, "payload_mass_g")) {
+    const src = data.payload_mass_g;
+    if (!src || typeof src !== "object" || Array.isArray(src)) return { error: "\"payload_mass_g\" はオブジェクト形式が必要です。" };
+    const pm = {};
+    for (const key of ["head", "hand_l", "hand_r"]) {
+      if (Object.prototype.hasOwnProperty.call(src, key)) {
+        const v = src[key];
+        if (!isFiniteNumber(v) || v < 0) return { error: "payload_mass_g." + key + " が不正です。" };
+        pm[key] = clampNum(v, 0, 20000);
+      }
+    }
+    result.payload_mass_g = pm;
+  }
+
+  // ---- custom_motion (reuses Section 7C's own validator directly) ----
+  if (Object.prototype.hasOwnProperty.call(data, "custom_motion")) {
+    const cm = data.custom_motion;
+    if (cm === null) {
+      result.custom_motion = null;
+    } else {
+      if (!cm || typeof cm !== "object" || Array.isArray(cm)) {
+        return { error: "\"custom_motion\" はオブジェクト形式または null が必要です。" };
+      }
+      const cmResult = parseAndValidateCustomMotionJSON(JSON.stringify(cm));
+      if (cmResult.error) return { error: "custom_motion: " + cmResult.error };
+      result.custom_motion = cmResult.keyframes;
+    }
+  }
+
+  return { result };
+}
+
+// Applies a validated `result` (as returned in parseAndValidateFullDesignJSON's
+// { result } branch) onto live state AND every corresponding UI control --
+// same "mutate the model, then mirror it into every input" discipline the
+// reset-to-defaults handler (Section 7B) already uses. Only sections
+// actually present in `result` are touched, by construction (the
+// validator above never adds a key for an absent section).
+function applyFullDesignState(result) {
+  if (result.joints) {
+    for (const name of Object.keys(result.joints)) {
+      const j = JOINTS_BY_NAME[name];
+      const e = result.joints[name];
+      if (e.axis) {
+        j.axis = e.axis;
+        if (axisSelects[name]) axisSelects[name].value = axisToLabel(j.axis);
+      }
+      if (e.range_deg) {
+        j.range_deg = e.range_deg;
+        sliderInputs[name].min = String(e.range_deg[0]);
+        sliderInputs[name].max = String(e.range_deg[1]);
+        const clamped = clampAngle(currentAngles[name], e.range_deg);
+        currentAngles[name] = clamped;
+        sliderInputs[name].value = String(clamped);
+        valueLabels[name].textContent = clamped.toFixed(0) + "°";
+        rangeMinInputs[name].value = String(e.range_deg[0]);
+        rangeMaxInputs[name].value = String(e.range_deg[1]);
+      }
+      if (e.motor) {
+        j.motor = e.motor;
+        motorSelects[name].value = e.motor;
+      }
+      if (e.mount_rx_deg !== undefined && mountInputs[name]) {
+        j.mount_rx_deg = e.mount_rx_deg;
+        mountInputs[name].rx.setExternally(e.mount_rx_deg);
+      }
+      if (e.mount_ry_deg !== undefined && mountInputs[name]) {
+        j.mount_ry_deg = e.mount_ry_deg;
+        mountInputs[name].ry.setExternally(e.mount_ry_deg);
+      }
+      if (e.mount_rz_deg !== undefined && mountInputs[name]) {
+        j.mount_rz_deg = e.mount_rz_deg;
+        mountInputs[name].rz.setExternally(e.mount_rz_deg);
+      }
+      if (e.length_mm !== undefined) {
+        setLinkLength(name, e.length_mm);
+        if (lengthInputs[name]) lengthInputs[name].value = String(Math.round(e.length_mm));
+      }
+      if (e.link_thickness_mm !== undefined) {
+        setLinkThickness(name, e.link_thickness_mm);
+        if (thicknessInputs[name]) thicknessInputs[name].setExternally(e.link_thickness_mm);
+      }
+      if (e.end_effector_length_mm !== undefined) {
+        setEndEffectorLength(name, e.end_effector_length_mm);
+        if (eeLengthInputs[name]) eeLengthInputs[name].value = String(Math.round(e.end_effector_length_mm));
+      }
+      if (e.end_effector_thickness_mm !== undefined) {
+        setEndEffectorThickness(name, e.end_effector_thickness_mm);
+        if (eeThicknessInputs[name]) eeThicknessInputs[name].setExternally(e.end_effector_thickness_mm);
+      }
+    }
+  }
+
+  if (result.parts) {
+    if (result.parts.weight_override_g) {
+      for (const key of Object.keys(result.parts.weight_override_g)) {
+        const v = result.parts.weight_override_g[key];
+        setPartWeightOverride(key, v);
+        if (weightOverrideComponents[key]) weightOverrideComponents[key].setExternally(v === undefined ? null : v);
+      }
+    }
+    if (result.parts.hand_own_mass_g) {
+      for (const key of Object.keys(result.parts.hand_own_mass_g)) {
+        HAND_OWN_MASS_G[key] = result.parts.hand_own_mass_g[key];
+        if (handOwnMassInputs[key]) handOwnMassInputs[key].setExternally(result.parts.hand_own_mass_g[key]);
+      }
+    }
+    if (result.parts.clavicle_thickness_mm !== undefined) {
+      CLAVICLE_THICKNESS_MM = result.parts.clavicle_thickness_mm;
+      if (clavicleThicknessInput) clavicleThicknessInput.setExternally(CLAVICLE_THICKNESS_MM);
+    }
+  }
+
+  if (result.head && result.head.radius_mm !== undefined) {
+    HEAD_RADIUS_MM = result.head.radius_mm;
+    if (headSizeInput) headSizeInput.setExternally(HEAD_RADIUS_MM);
+  }
+
+  if (result.hands) {
+    for (const side of ["l", "r"]) {
+      if (result.hands[side] && result.hands[side].radius_mm !== undefined) {
+        HAND_RADIUS_MM[side] = result.hands[side].radius_mm;
+        if (handSizeInputs[side]) handSizeInputs[side].setExternally(HAND_RADIUS_MM[side]);
+      }
+    }
+  }
+
+  if (result.payload_mass_g) {
+    for (const key of Object.keys(result.payload_mass_g)) {
+      PAYLOAD_MASS_G[key] = result.payload_mass_g[key];
+      if (payloadInputs[key]) payloadInputs[key].setExternally(result.payload_mass_g[key]);
+    }
+  }
+
+  // Present-but-null means "clear it" (mirrors export: no keyframes ->
+  // null); absent means "leave whatever custom motion exists alone".
+  if (Object.prototype.hasOwnProperty.call(result, "custom_motion")) {
+    SAMPLE_MOTIONS.custom.keyframes = result.custom_motion === null ? [] : result.custom_motion;
+    invalidateCustomMotionCache();
+    clearCustomKfMessage();
+    onCustomKeyframesChanged();
+  }
+
+  updateThicknessHints();
+  updateWeightHints();
+  render();
+}
+
+function showDesignImportMessage(text, isError) {
+  designImportMessageEl.textContent = text;
+  designImportMessageEl.hidden = false;
+  designImportMessageEl.classList.toggle("success", !isError);
+}
+function showDesignShareMessage(text, isError) {
+  designShareMessageEl.textContent = text;
+  designShareMessageEl.hidden = false;
+  designShareMessageEl.classList.toggle("success", !isError);
+}
+
+function refreshDesignExportArea() {
+  designExportArea.value = JSON.stringify(collectFullDesignState(), null, 2);
+}
+designExportBtn.addEventListener("click", refreshDesignExportArea);
+// Same one-click-select convenience as the Section 7C export textarea.
+designExportArea.addEventListener("click", () => designExportArea.select());
+refreshDesignExportArea(); // seed it with the current (default) state, like Section 7C does
+
+designImportBtn.addEventListener("click", () => {
+  const text = designImportArea.value.trim();
+  if (!text) {
+    showDesignImportMessage("貼り付けるJSONがありません。", true);
+    return;
+  }
+  const outcome = parseAndValidateFullDesignJSON(text);
+  if (outcome.error) {
+    showDesignImportMessage(outcome.error, true);
+    return;
+  }
+  applyFullDesignState(outcome.result);
+  showDesignImportMessage("読み込みました: " + Object.keys(outcome.result).join(", "), false);
+});
+
+// ---- URL-safe base64 (UTF-8 safe, for the share-link bonus) ----
+function base64UrlEncode(str) {
+  const b64 = btoa(unescape(encodeURIComponent(str)));
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function base64UrlDecode(b64url) {
+  let b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  return decodeURIComponent(escape(atob(b64)));
+}
+
+const DESIGN_HASH_PREFIX = "#design=";
+// Rough only -- not a hard limit (per the M8 brief, this is best-effort;
+// the JSON textarea above remains the reliable path for very large
+// custom motions).
+const DESIGN_URL_LENGTH_WARNING_THRESHOLD = 6000;
+
+designShareBtn.addEventListener("click", () => {
+  let encoded;
+  try {
+    encoded = base64UrlEncode(JSON.stringify(collectFullDesignState()));
+  } catch (e) {
+    showDesignShareMessage("共有URLの生成に失敗しました。", true);
+    return;
+  }
+  const url = location.origin + location.pathname + DESIGN_HASH_PREFIX + encoded;
+  // ALWAYS shown, regardless of whether the clipboard write below
+  // succeeds -- the reliable fallback a sandboxed Artifact iframe (where
+  // navigator.clipboard is commonly blocked) still needs.
+  designShareUrlArea.value = url;
+  designShareUrlArea.select();
+  const sizeNote =
+    url.length > DESIGN_URL_LENGTH_WARNING_THRESHOLD
+      ? " URLが長いため一部の環境で開けない可能性があります。その場合は上のJSONエクスポートをお使いください。"
+      : "";
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(
+        () => showDesignShareMessage("共有URLをクリップボードにコピーしました。" + sizeNote, false),
+        () => showDesignShareMessage("自動コピーできませんでした。下のURL欄から選択してコピーしてください。" + sizeNote, true)
+      );
+    } else {
+      showDesignShareMessage("このブラウザでは自動コピーに対応していません。下のURL欄から選択してコピーしてください。" + sizeNote, true);
+    }
+  } catch (e) {
+    showDesignShareMessage("自動コピーできませんでした。下のURL欄から選択してコピーしてください。" + sizeNote, true);
+  }
+});
+
+// On load, auto-apply a design embedded in the URL fragment (from a
+// share link generated above), reusing the EXACT SAME validator as the
+// textarea import path.
+function tryLoadDesignFromHash() {
+  if (!location.hash || location.hash.indexOf(DESIGN_HASH_PREFIX) !== 0) return;
+  const encoded = location.hash.slice(DESIGN_HASH_PREFIX.length);
+  let json;
+  try {
+    json = base64UrlDecode(encoded);
+  } catch (e) {
+    showDesignImportMessage("共有リンクのデータを読み取れませんでした。", true);
+    return;
+  }
+  const outcome = parseAndValidateFullDesignJSON(json);
+  if (outcome.error) {
+    showDesignImportMessage("共有リンクの読み込みに失敗しました: " + outcome.error, true);
+    return;
+  }
+  applyFullDesignState(outcome.result);
+  refreshDesignExportArea();
+  showDesignImportMessage("共有リンクから設計を読み込みました: " + Object.keys(outcome.result).join(", "), false);
+}
+tryLoadDesignFromHash();
 
 /* =====================================================================
  * SECTION 8: RESIZE + RENDER LOOP
