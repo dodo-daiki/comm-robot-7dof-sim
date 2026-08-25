@@ -219,6 +219,152 @@
     flex: 0 0 auto;
     white-space: nowrap;
   }
+  .motion-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #8a6d3f;
+    background: #fbf3e3;
+    border: 1px solid #e8d5ab;
+    border-radius: 5px;
+    padding: 6px 8px;
+    line-height: 1.4;
+  }
+
+  /* ---- custom motion editor (Section 7C) ---- */
+  .custom-kf-capture-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11.5px;
+    color: #444;
+    margin-top: 4px;
+  }
+  .custom-full-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px 0;
+    font-size: 12.5px;
+    border: 1px solid #b9ad98;
+    background: #f4efe6;
+    color: #4a4030;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .custom-full-btn:hover:not(:disabled) {
+    background: #ecdfc9;
+  }
+  .custom-full-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .custom-full-btn.custom-btn-danger {
+    color: #7a3327;
+    border-color: #d3b0a6;
+    background: #f7e9e5;
+  }
+  .custom-full-btn.custom-btn-danger:hover:not(:disabled) {
+    background: #f0d4cb;
+  }
+  .custom-kf-message {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #7a3327;
+    background: #fbe9e7;
+    border: 1px solid #e5c1ba;
+    border-radius: 5px;
+    padding: 5px 8px;
+    line-height: 1.4;
+  }
+  .custom-kf-message.success {
+    color: #3f6b3f;
+    background: #eaf3e8;
+    border-color: #c3ddbe;
+  }
+  #custom-kf-list {
+    margin-top: 8px;
+  }
+  .custom-kf-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 6px;
+    background: rgba(250, 248, 244, 0.6);
+    margin-bottom: 5px;
+    font-size: 11px;
+  }
+  .custom-kf-row .custom-kf-index {
+    flex: 0 0 auto;
+    color: #8a7a63;
+    font-weight: 700;
+    width: 1.4em;
+  }
+  .custom-kf-row .custom-kf-time-input {
+    width: 52px;
+    font-size: 11px;
+    padding: 3px 4px;
+    border: 1px solid #cfc6b4;
+    border-radius: 4px;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+  }
+  .custom-kf-row .custom-kf-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #555;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .custom-kf-row .custom-kf-delete-btn {
+    flex: 0 0 auto;
+    border: 1px solid #d3b0a6;
+    background: #f7e9e5;
+    color: #7a3327;
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .custom-kf-row .custom-kf-delete-btn:hover {
+    background: #f0d4cb;
+  }
+  .custom-kf-empty {
+    font-size: 11px;
+    color: #888;
+    padding: 4px 2px;
+  }
+  .custom-io-details {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: #444;
+  }
+  .custom-io-details summary {
+    cursor: pointer;
+    color: #8a7a63;
+    font-weight: 600;
+    padding: 4px 0;
+  }
+  .custom-io-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 4px;
+  }
+  .custom-io-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+    padding: 5px 6px;
+    border: 1px solid #cfc6b4;
+    border-radius: 5px;
+    resize: vertical;
+  }
   .joint-details {
     padding: 4px 10px 10px 10px;
     border-top: 1px dashed rgba(0, 0, 0, 0.1);
@@ -341,6 +487,30 @@
     <div class="motion-progress-track"><div id="motion-progress-fill" class="motion-progress-fill"></div></div>
     <span id="motion-progress-label">0.0s / 0.0s</span>
   </div>
+  <div id="motion-hint" class="motion-hint" hidden></div>
+
+  <h2 class="section-heading">カスタム動作を作成</h2>
+  <p class="subtitle">現在の全関節のポーズをキーフレームとして追加し、自分だけの動作を作れます。「サンプル動作」の「カスタム動作」を選ぶと再生できます。</p>
+  <div class="custom-kf-capture-row">
+    <span class="field-label">次のキーフレーム時刻 (s)</span>
+    <span id="custom-next-time-slot"></span>
+  </div>
+  <button id="custom-add-kf-btn" type="button" class="custom-full-btn">現在のポーズをキーフレーム追加</button>
+  <div id="custom-kf-message" class="custom-kf-message" hidden></div>
+  <div id="custom-kf-list"></div>
+  <button id="custom-clear-btn" type="button" class="custom-full-btn custom-btn-danger">すべて削除</button>
+
+  <details class="custom-io-details">
+    <summary>エクスポート / インポート (JSON)</summary>
+    <div class="custom-io-body">
+      <span class="field-label">エクスポート (コピーして保存してください)</span>
+      <textarea id="custom-export-area" class="custom-io-textarea" readonly rows="4"></textarea>
+      <span class="field-label">インポート (JSONを貼り付け)</span>
+      <textarea id="custom-import-area" class="custom-io-textarea" rows="4" placeholder='{"name":"...","keyframes":[{"time_s":0,"angles":{...}}]}'></textarea>
+      <button id="custom-import-btn" type="button" class="custom-full-btn">読み込む</button>
+      <div id="custom-import-message" class="custom-kf-message" hidden></div>
+    </div>
+  </details>
 
   <h2 class="section-heading">関節</h2>
   <div id="joint-sliders"></div>
@@ -1902,19 +2072,48 @@ const SAMPLE_MOTIONS = {
     ],
   },
 };
-const MOTION_ORDER = ["nod", "look_around", "wave", "bow", "idle"];
 
+// The user-authored 6th "motion", edited at runtime by the Section 7C
+// custom motion editor (unlike the 5 frozen presets above, which are
+// never mutated). Starts empty; the editor pushes/removes/reorders
+// entries in its `keyframes` array directly. Deliberately a SEPARATE
+// statement from the SAMPLE_MOTIONS literal above (not just another key
+// in it) to keep that visual distinction obvious at a glance.
+SAMPLE_MOTIONS.custom = {
+  label_ja: "カスタム動作",
+  loop: false,
+  keyframes: [],
+};
+
+const MOTION_ORDER = ["nod", "look_around", "wave", "bow", "idle", "custom"];
+
+// Longest time_s across a motion's keyframes -- NOT motion.keyframes'
+// last array element's time_s, since (unlike the 5 presets, which are
+// always authored in chronological order) the custom motion's keyframes
+// array can be mutated in any order by the editor. Also safe for an
+// empty keyframes array (the custom motion before its first capture),
+// returning 0 rather than throwing.
 function motionDurationOf(motion) {
-  return motion.keyframes[motion.keyframes.length - 1].time_s;
+  let maxT = 0;
+  for (const kf of motion.keyframes) {
+    if (kf.time_s > maxT) maxT = kf.time_s;
+  }
+  return maxT;
 }
 
 // Builds (once per motion, memoized directly on the motion object) a
 // per-joint sparse timeline: { [jointName]: [{t, angle}, ...] } sorted by
-// t, containing only the keyframes that actually mention that joint.
+// t, containing only the keyframes that actually mention that joint. The
+// motion's OWN keyframes array does not need to already be in time order
+// -- this sorts a shallow copy first, so e.g. the custom motion editor
+// never has to require chronological entry (the editor also keeps its
+// underlying array sorted after every edit, for a sane list/export
+// order, but this sort makes correctness NOT depend on that).
 function jointTimelines(motion) {
   if (motion._timelines) return motion._timelines;
   const timelines = {};
-  for (const kf of motion.keyframes) {
+  const sortedKeyframes = motion.keyframes.slice().sort((a, b) => a.time_s - b.time_s);
+  for (const kf of sortedKeyframes) {
     for (const name of Object.keys(kf.angles)) {
       if (!timelines[name]) timelines[name] = [];
       timelines[name].push({ t: kf.time_s, angle: kf.angles[name] });
@@ -1922,6 +2121,13 @@ function jointTimelines(motion) {
   }
   motion._timelines = timelines;
   return timelines;
+}
+
+// Custom motion's keyframes were just mutated (add/delete/clear/import/
+// time-edit) -- drop the cached timeline so the next jointTimelines()
+// call rebuilds it from the current array instead of serving stale data.
+function invalidateCustomMotionCache() {
+  SAMPLE_MOTIONS.custom._timelines = null;
 }
 
 // Smoothstep ease-in/out, applied independently within each keyframe-to-
@@ -2005,9 +2211,17 @@ function applyMotionPose(pose) {
 // actively PLAYING (not merely selected/paused/stopped) -- dragging one
 // mid-playback would immediately be overwritten by the next animation
 // frame anyway, so disabling it (dimmed via the :disabled CSS above) is
-// clearer than letting the user fight it.
+// clearer than letting the user fight it. Also locks the Section 7C
+// "capture current pose as keyframe" button for the same reason -- while
+// playing, currentAngles reflects the ANIMATION's pose, not a manually
+// posed one, and capturing that would be confusing rather than useful.
+// customAddKfBtn is declared later (Section 7C) but this function is only
+// ever CALLED after the whole script has finished running top-to-bottom
+// (from a user click or another already-deferred call), so the binding
+// is always initialized by the time this body actually executes.
 function setPoseSlidersLocked(locked) {
   for (const j of JOINTS) sliderInputs[j.name].disabled = locked;
+  customAddKfBtn.disabled = locked;
 }
 
 function updateMotionProgressUI(motion, elapsed, duration) {
@@ -2022,9 +2236,21 @@ function updateMotionProgressUI(motion, elapsed, duration) {
   }
 }
 
+// Also disables Play (with an explanatory hint, motionHintEl -- declared
+// in Section 7C but, per the setPoseSlidersLocked comment above, always
+// initialized by the time this actually runs) whenever "custom" is
+// selected but doesn't have enough keyframes yet to be playable.
 function updateMotionButtons() {
   motionPlayBtn.textContent = motionState === "playing" ? "一時停止" : "再生";
   motionStopBtn.disabled = motionState === "stopped";
+  const customTooShort = activeMotionKey === "custom" && SAMPLE_MOTIONS.custom.keyframes.length < 2;
+  motionPlayBtn.disabled = customTooShort;
+  if (motionHintEl) {
+    motionHintEl.hidden = !customTooShort;
+    if (customTooShort) {
+      motionHintEl.textContent = "カスタム動作の再生にはキーフレームが2つ以上必要です(下の「カスタム動作を作成」で追加してください)。";
+    }
+  }
 }
 
 // One requestAnimationFrame tick: advances motionElapsed by real wall-
@@ -2066,6 +2292,10 @@ function motionTick(nowMs) {
 // discarded the moment playback resumes, rather than producing a hybrid
 // pose.
 function playMotion() {
+  // Defense in depth alongside the disabled Play button in
+  // updateMotionButtons(): never actually start playback of "custom"
+  // with fewer than 2 keyframes (nothing to interpolate between).
+  if (activeMotionKey === "custom" && SAMPLE_MOTIONS.custom.keyframes.length < 2) return;
   if (motionState === "stopped" || motionState === "finished") motionElapsed = 0;
   motionState = "playing";
   motionLastTickMs = null; // avoid a large dt jump from time spent paused
@@ -2107,7 +2337,13 @@ motionSelect.addEventListener("change", () => {
   stopMotion();
 });
 
-stopMotion(); // initialize progress label/buttons/pose for the default-selected motion
+// NOTE: the initial stopMotion() call that seeds the progress label/
+// buttons/pose for the default-selected motion is deferred to the very
+// end of Section 7C, not made here -- updateMotionButtons() (called by
+// stopMotion()) reads motionHintEl, which Section 7C declares. Section
+// 7C's own functions/handlers similarly assume everything above (this
+// section) is already fully initialized, same forward-reference pattern
+// as setPoseSlidersLocked's customAddKfBtn reference.
 
 document.getElementById("reset-btn").addEventListener("click", () => {
   // Halt any in-progress/completed motion FIRST so it can't race with (or
@@ -2150,6 +2386,292 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   }
   render();
 });
+
+/* =====================================================================
+ * SECTION 7C: CUSTOM MOTION EDITOR (M4.1)
+ * ---------------------------------------------------------------------
+ * Lets the user hand-author a 6th motion (SAMPLE_MOTIONS.custom, wired
+ * into the exact same playback engine/UI as the 5 presets above -- see
+ * MOTION_ORDER) by capturing the CURRENT pose (all 7 joint angles at
+ * once, from currentAngles -- the same source the sliders themselves
+ * read from, so a keyframe is naturally a full multi-axis snapshot, not
+ * restricted to one joint) as a new keyframe at a chosen time.
+ *
+ * Deliberately independent of "デフォルトに戻す": that button resets
+ * skeleton/design parameters (link length, range, motor, axis, mount,
+ * thickness) and the live pose, none of which this section touches on
+ * SAMPLE_MOTIONS.custom -- the reset handler above has no code path that
+ * clears custom keyframes, and this section adds none either. Only the
+ * explicit "すべて削除" button clears them.
+ * ===================================================================== */
+
+const customAddKfBtn = document.getElementById("custom-add-kf-btn");
+const customClearBtn = document.getElementById("custom-clear-btn");
+const customKfMessageEl = document.getElementById("custom-kf-message");
+const customKfListEl = document.getElementById("custom-kf-list");
+const customExportArea = document.getElementById("custom-export-area");
+const customImportArea = document.getElementById("custom-import-area");
+const customImportBtn = document.getElementById("custom-import-btn");
+const customImportMessageEl = document.getElementById("custom-import-message");
+const customNextTimeSlot = document.getElementById("custom-next-time-slot");
+const motionHintEl = document.getElementById("motion-hint");
+
+// "Next keyframe time" field: defaults to (last keyframe's time + 1.0s),
+// or 0.0s for the first one, but is freely editable before capture --
+// reuses the SAME baseline-on-focus/revert-on-invalid-blur validated
+// input pattern as the mount-rotation/thickness fields (makeValidatedNumberInput,
+// Section 7), per the M4.1 brief's explicit instruction not to
+// reintroduce the input-corruption class fixed in a5ec3bf/c09f7f3. No
+// onValid side effect is needed here (unlike range/mount/thickness,
+// nothing else derives live from this field) -- it's simply read at
+// capture time.
+const customNextTimeField = makeValidatedNumberInput(0, 0, 600, () => {});
+customNextTimeField.input.className = "custom-kf-time-input";
+customNextTimeSlot.appendChild(customNextTimeField.input);
+
+function showCustomKfMessage(text) {
+  customKfMessageEl.textContent = text;
+  customKfMessageEl.hidden = false;
+}
+function clearCustomKfMessage() {
+  customKfMessageEl.hidden = true;
+  customKfMessageEl.textContent = "";
+}
+function showCustomImportMessage(text, isError) {
+  customImportMessageEl.textContent = text;
+  customImportMessageEl.hidden = false;
+  customImportMessageEl.classList.toggle("success", !isError);
+}
+
+function nextDefaultKeyframeTime() {
+  const kfs = SAMPLE_MOTIONS.custom.keyframes;
+  if (kfs.length === 0) return 0;
+  const maxT = Math.max(...kfs.map((k) => k.time_s));
+  return Math.round((maxT + 1.0) * 100) / 100;
+}
+
+// Compact one-line pose summary for a keyframe list row: only the
+// joints whose angle is meaningfully non-zero, so a mostly-neutral pose
+// doesn't produce 7 redundant "name:0°" entries.
+function summarizePose(angles) {
+  const parts = [];
+  for (const j of JOINTS) {
+    const v = angles[j.name];
+    if (typeof v === "number" && Math.abs(v) > 0.5) parts.push(j.name + ":" + v.toFixed(0) + "°");
+  }
+  return parts.length ? parts.join(", ") : "(全関節 0°)";
+}
+
+function refreshCustomExportArea() {
+  const payload = {
+    name: "カスタム動作",
+    keyframes: SAMPLE_MOTIONS.custom.keyframes.map((k) => ({ time_s: k.time_s, angles: { ...k.angles } })),
+  };
+  customExportArea.value = JSON.stringify(payload, null, 2);
+}
+
+// Rebuilds the visible keyframe list (sorted by time_s -- and writes that
+// sorted order back onto SAMPLE_MOTIONS.custom.keyframes itself, purely
+// for a predictable/matching list-vs-export order; jointTimelines()
+// doesn't actually depend on this, it sorts its own defensive copy) plus
+// the export textarea and the motion Play button's enabled state. Called
+// after every add/delete/clear/import, and on time-field BLUR (not on
+// every live keystroke -- see the per-row time field below for why).
+function renderCustomKeyframeList() {
+  const sorted = SAMPLE_MOTIONS.custom.keyframes.slice().sort((a, b) => a.time_s - b.time_s);
+  SAMPLE_MOTIONS.custom.keyframes = sorted;
+  customKfListEl.innerHTML = "";
+
+  if (sorted.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "custom-kf-empty";
+    empty.textContent = "キーフレームはまだありません。上のボタンで追加してください。";
+    customKfListEl.appendChild(empty);
+  } else {
+    sorted.forEach((kf, idx) => {
+      const row = document.createElement("div");
+      row.className = "custom-kf-row";
+
+      const indexEl = document.createElement("span");
+      indexEl.className = "custom-kf-index";
+      indexEl.textContent = "#" + (idx + 1);
+      row.appendChild(indexEl);
+
+      const timeField = makeValidatedNumberInput(kf.time_s, 0, 600, (v) => {
+        kf.time_s = v;
+        invalidateCustomMotionCache();
+        refreshCustomExportArea();
+      });
+      timeField.input.className = "custom-kf-time-input";
+      // Re-sort/rebuild the list only once editing is DONE (blur), not on
+      // every live keystroke -- rebuilding this row's own DOM mid-typing
+      // (as a full re-render would) would rip focus/cursor away from the
+      // very input the user is typing into. Live keystrokes still update
+      // the underlying data + export text above; only the on-screen
+      // order/index labels wait for blur.
+      timeField.input.addEventListener("blur", () => {
+        renderCustomKeyframeList();
+      });
+      row.appendChild(timeField.input);
+
+      const summaryEl = document.createElement("span");
+      summaryEl.className = "custom-kf-summary";
+      summaryEl.textContent = summarizePose(kf.angles);
+      summaryEl.title = summaryEl.textContent;
+      row.appendChild(summaryEl);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "custom-kf-delete-btn";
+      deleteBtn.textContent = "×";
+      deleteBtn.title = "このキーフレームを削除";
+      deleteBtn.addEventListener("click", () => {
+        const i = SAMPLE_MOTIONS.custom.keyframes.indexOf(kf);
+        if (i !== -1) SAMPLE_MOTIONS.custom.keyframes.splice(i, 1);
+        invalidateCustomMotionCache();
+        clearCustomKfMessage();
+        onCustomKeyframesChanged();
+      });
+      row.appendChild(deleteBtn);
+
+      customKfListEl.appendChild(row);
+    });
+  }
+
+  refreshCustomExportArea();
+  updateMotionButtons();
+}
+
+// Shared post-mutation hook for delete/clear/import (capture calls
+// renderCustomKeyframeList + its own follow-ups directly): re-renders,
+// and gracefully stops playback if the custom motion was actively
+// playing/paused and just dropped below the 2-keyframe minimum.
+function onCustomKeyframesChanged() {
+  renderCustomKeyframeList();
+  if (
+    activeMotionKey === "custom" &&
+    SAMPLE_MOTIONS.custom.keyframes.length < 2 &&
+    (motionState === "playing" || motionState === "paused")
+  ) {
+    stopMotion();
+  }
+}
+
+customAddKfBtn.addEventListener("click", () => {
+  const t = parseFloat(customNextTimeField.input.value);
+  if (!isFinite(t) || t < 0) {
+    showCustomKfMessage("時刻が不正です。0以上の数値を入力してください。");
+    return;
+  }
+  const dup = SAMPLE_MOTIONS.custom.keyframes.some((k) => Math.abs(k.time_s - t) < 0.01);
+  if (dup) {
+    showCustomKfMessage("同じ時刻(" + t.toFixed(2) + "s)のキーフレームがすでにあります。時刻を変えてください。");
+    return;
+  }
+  // Full multi-axis snapshot: ALL 7 joints' current angles at once (a
+  // fresh shallow copy, never a live reference into currentAngles).
+  SAMPLE_MOTIONS.custom.keyframes.push({ time_s: t, angles: { ...currentAngles } });
+  invalidateCustomMotionCache();
+  clearCustomKfMessage();
+  onCustomKeyframesChanged();
+  customNextTimeField.setExternally(nextDefaultKeyframeTime());
+});
+
+customClearBtn.addEventListener("click", () => {
+  if (SAMPLE_MOTIONS.custom.keyframes.length === 0) return;
+  SAMPLE_MOTIONS.custom.keyframes = [];
+  invalidateCustomMotionCache();
+  clearCustomKfMessage();
+  onCustomKeyframesChanged();
+  customNextTimeField.setExternally(0);
+});
+
+// Validates a pasted-JSON candidate for the custom motion, returning
+// either { keyframes: [...] } (cleaned + sorted, ready to use) or
+// { error: "..." } with a friendly Japanese message -- never throws, so
+// a malformed/garbage paste can't crash the page or leave SAMPLE_MOTIONS.
+// custom half-updated.
+function parseAndValidateCustomMotionJSON(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return { error: "JSONとして読み取れませんでした。形式を確認してください。" };
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { error: "オブジェクト形式（{ \"keyframes\": [...] }）が必要です。" };
+  }
+  if (!Array.isArray(data.keyframes)) {
+    return { error: "\"keyframes\" 配列が必要です。" };
+  }
+  if (data.keyframes.length === 0) {
+    return { error: "キーフレームが1つもありません。" };
+  }
+  const validJointNames = new Set(JOINTS.map((j) => j.name));
+  const cleaned = [];
+  const seenTimes = [];
+  for (let i = 0; i < data.keyframes.length; i++) {
+    const kf = data.keyframes[i];
+    const n = i + 1;
+    if (!kf || typeof kf !== "object" || Array.isArray(kf)) {
+      return { error: "キーフレーム" + n + ": 形式が不正です。" };
+    }
+    if (typeof kf.time_s !== "number" || !isFinite(kf.time_s) || kf.time_s < 0) {
+      return { error: "キーフレーム" + n + ": time_s が不正です（0以上の数値が必要）。" };
+    }
+    if (!kf.angles || typeof kf.angles !== "object" || Array.isArray(kf.angles)) {
+      return { error: "キーフレーム" + n + ": angles が不正です。" };
+    }
+    const angles = {};
+    for (const [name, val] of Object.entries(kf.angles)) {
+      if (!validJointNames.has(name)) {
+        return { error: "キーフレーム" + n + ": 不明な関節名 \"" + name + "\"。" };
+      }
+      if (typeof val !== "number" || !isFinite(val)) {
+        return { error: "キーフレーム" + n + ": 関節 \"" + name + "\" の角度が数値ではありません。" };
+      }
+      angles[name] = val;
+    }
+    if (Object.keys(angles).length === 0) {
+      return { error: "キーフレーム" + n + ": 角度が1つも指定されていません。" };
+    }
+    for (const t of seenTimes) {
+      if (Math.abs(t - kf.time_s) < 0.01) {
+        return { error: "キーフレームの時刻が重複しています（" + kf.time_s + "s）。" };
+      }
+    }
+    seenTimes.push(kf.time_s);
+    cleaned.push({ time_s: kf.time_s, angles });
+  }
+  cleaned.sort((a, b) => a.time_s - b.time_s);
+  return { keyframes: cleaned };
+}
+
+customImportBtn.addEventListener("click", () => {
+  const text = customImportArea.value.trim();
+  if (!text) {
+    showCustomImportMessage("貼り付けるJSONがありません。", true);
+    return;
+  }
+  const result = parseAndValidateCustomMotionJSON(text);
+  if (result.error) {
+    showCustomImportMessage(result.error, true);
+    return;
+  }
+  SAMPLE_MOTIONS.custom.keyframes = result.keyframes;
+  invalidateCustomMotionCache();
+  clearCustomKfMessage();
+  onCustomKeyframesChanged();
+  customNextTimeField.setExternally(nextDefaultKeyframeTime());
+  showCustomImportMessage(result.keyframes.length + "個のキーフレームを読み込みました。", false);
+});
+
+// Convenience: clicking the read-only export textarea selects all of it,
+// so copying it out is a single click + Ctrl/Cmd+C.
+customExportArea.addEventListener("click", () => customExportArea.select());
+
+renderCustomKeyframeList(); // seed the empty-state placeholder + export text
+stopMotion(); // now safe: everything both this section and Section 7B need is initialized
 
 /* =====================================================================
  * SECTION 8: RESIZE + RENDER LOOP
