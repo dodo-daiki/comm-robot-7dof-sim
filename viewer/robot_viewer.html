@@ -580,7 +580,7 @@
   </details>
 
   <h2 class="section-heading">トルク・負荷</h2>
-  <p class="subtitle">現在のポーズで各関節モーターにかかる推定重力トルクです。緑=定格の70%未満、黄=定格に接近/到達、赤=定格超過、濃赤=ストール超過(そのポーズを保持不可)。リンク長・太さ・モーター・取付角度・ポーズを変えるたびに再計算されます。</p>
+  <p class="subtitle">現在のポーズで各関節モーターにかかる推定重力トルクです。緑=定格の70%未満、黄=定格に接近、赤=定格超過、濃赤=ストール超過(そのポーズを保持不可)。リンク長・太さ・モーター・取付角度・ポーズを変えるたびに再計算されます。</p>
   <div id="torque-summary-row" class="torque-summary-row"></div>
   <div class="torque-payload-row">
     <span class="field-label">頭部ペイロード (g)</span>
@@ -1113,16 +1113,24 @@ function ancestorChainInclusive(byName, jointName) {
   return chain;
 }
 
-// Mirrors dynamics.py::_joint_axis_world EXACTLY, extended with the
-// mount-rotation insertion already established for jointTransform() and
-// the motor-cylinder render loop (Section 5): parent_rotation @ R_mount @
-// axis_local. At mount_r{x,y,z}_deg = 0 (identity R_mount), this reduces
-// to Python's parent_rotation @ axis_local bit-for-bit, same reasoning
-// as jointTransform's own mount-rotation extension.
+// Mirrors dynamics.py::_joint_axis_world EXACTLY -- including its own
+// `axis = joint.axis / np.linalg.norm(joint.axis)` normalization, done
+// here too even though every axis this viewer's UI can ever produce
+// (the X/Y/Z dropdown) is already unit-length, so this is a no-op in
+// practice today; it's here so the claim of an exact mirror stays
+// literally true, not just true for the axis values currently reachable
+// through the UI -- extended with the mount-rotation insertion already
+// established for jointTransform() and the motor-cylinder render loop
+// (Section 5): parent_rotation @ R_mount @ axis_local. At
+// mount_r{x,y,z}_deg = 0 (identity R_mount), this reduces to Python's
+// parent_rotation @ axis_local bit-for-bit, same reasoning as
+// jointTransform's own mount-rotation extension.
 function jointAxisWorld(joint, transforms, baseTransform) {
   const parentRotation = joint.parent !== null ? transforms[joint.parent] : baseTransform;
+  const axisLen = vecLen(joint.axis);
+  const axisUnit = [joint.axis[0] / axisLen, joint.axis[1] / axisLen, joint.axis[2] / axisLen];
   const mountRotation = mountRotationMatrix4(joint);
-  const mountedAxisLocal = rotateOnly(mountRotation, joint.axis);
+  const mountedAxisLocal = rotateOnly(mountRotation, axisUnit);
   return rotateOnly(parentRotation, mountedAxisLocal);
 }
 
@@ -3148,7 +3156,12 @@ function updateTorqueDisplay() {
     const status = torqueStatus(m.pct_of_rated, m.pct_of_stall);
     const statusJa = torqueStatusLabelJa(status);
     const detailText =
-      m.torque_nm.toFixed(2) + " N·m (" + statusJa + ": 定格" + m.pct_of_rated.toFixed(0) + "% / ストール" + m.pct_of_stall.toFixed(0) + "%)";
+      // toFixed(1), not (0): rounding a value like 99.9% up to a
+      // displayed "100%" would visually contradict its own color/label
+      // bucket (99.9% is still "warn"/yellow, under the >=100 "over"
+      // threshold) -- one decimal keeps the displayed number and the
+      // bucket it's rounded into always consistent with each other.
+      m.torque_nm.toFixed(2) + " N·m (" + statusJa + ": 定格" + m.pct_of_rated.toFixed(1) + "% / ストール" + m.pct_of_stall.toFixed(1) + "%)";
 
     const detailEl = torqueFieldEls[j.name];
     if (detailEl) {
