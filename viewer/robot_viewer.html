@@ -2342,7 +2342,7 @@ function computeFeasibilityIssuesForJoint(j, T0) {
     if (overlap > FEASIBILITY_OVERLAP_THRESHOLD_MM) {
       issues.push(
         "このモーター(Ø" + spec.diameter_mm + "mm)は" + part.label + "(半径" + Math.round(partRadius) +
-        "mm)と約" + Math.round(overlap) + "mmの重なりで物理的に干渉します。"
+        "mm)と約" + Math.round(overlap) + "mmの重なりがあり、実機では物理的に干渉します。"
       );
     }
   }
