@@ -49,30 +49,30 @@ def test_shoulder_torque_matches_hand_computation_with_arm_extended(config):
     # forearm out to +Y, giving a clean nonzero lever arm.
     #
     # Hand computation (independent of robot.dynamics -- verified separately
-    # with a standalone numpy script before writing this test):
+    # with a standalone numpy script before writing this test), using the
+    # post-M9-defaults-update elbow_pitch_l origin offset of (0, 0, -120)
+    # (was (0, 0, -250)):
     #   shoulder_pitch_l world pos (fixed regardless of its own angle):
-    #     = (0, 0, base_height_mm) + (-150, 0, 300) = (-150, 0, 800)
+    #     = (0, 0, base_height_mm) + (-125.21980673998821, 0, 250.43961347997643)
     #     [base_height_mm = 500, offset from data/joints.json]
     #   R_shoulder = Rx(90) (waist_yaw = 0 so parent rotation is identity)
-    #   elbow_pitch_l world pos = shoulder_pos + Rx(90) @ (0, 0, -250)
-    #                            = (-150, 0, 800) + (0, 250, 0)
-    #                            = (-150, 250, 800)
+    #   elbow_pitch_l world pos = shoulder_pos + Rx(90) @ (0, 0, -120)
+    #                            = shoulder_pos + (0, 120, 0)
     #   (only the relative lever-arm vectors below actually feed the
-    #   assertion, so the shared +800 Z offset drops out of every r; it's
-    #   spelled out here only so the comment matches the real geometry.)
+    #   assertion, so the shared shoulder-pos offset drops out of every r;
+    #   it's spelled out here only so the comment matches the real geometry.)
     #
     #   Link "elbow_pitch_l" (shoulder -> elbow), mass = 100 g = 0.1 kg:
-    #     midpoint = (-150, 125, 800)
-    #     r = midpoint - shoulder_pos = (0, 0.125, 0) m
+    #     r = midpoint - shoulder_pos = (0, 0.06, 0) m
     #     F = (0, 0, -0.1*9.81) = (0, 0, -0.981) N
-    #     r x F = (0.125*-0.981 - 0, 0 - 0, 0 - 0) = (-0.122625, 0, 0)
+    #     r x F = (0.06*-0.981 - 0, 0 - 0, 0 - 0) = (-0.05886, 0, 0)
     #
     #   elbow_pitch_l's own motor (GIM4310-10, 217 g = 0.217 kg), located at
     #   the elbow's own world position (downstream of the shoulder, so it
     #   loads the shoulder too):
-    #     r = elbow_pos - shoulder_pos = (0, 0.25, 0) m
+    #     r = elbow_pos - shoulder_pos = (0, 0.12, 0) m
     #     F = (0, 0, -0.217*9.81) = (0, 0, -2.12877) N
-    #     r x F = (0.25*-2.12877 - 0, 0, 0) = (-0.5321925, 0, 0)
+    #     r x F = (0.12*-2.12877 - 0, 0, 0) = (-0.2554524, 0, 0)
     #
     #   shoulder_pitch_l's own motor sits at r = 0 -> contributes 0.
     #   hand_l_link mass is 0 (not provided) -> contributes 0.
@@ -80,14 +80,14 @@ def test_shoulder_torque_matches_hand_computation_with_arm_extended(config):
     #   axis_world for shoulder_pitch_l = Rx-parent(waist, angle 0) applied
     #   to local axis (1,0,0) = (1, 0, 0).
     #
-    #   total = dot((-0.122625,0,0) + (-0.5321925,0,0), (1,0,0))
-    #         = -0.6548175 N*m
+    #   total = dot((-0.05886,0,0) + (-0.2554524,0,0), (1,0,0))
+    #         = -0.3143124 N*m
     link_masses_g = {"elbow_pitch_l": 100.0}
     pose = {"shoulder_pitch_l": 90.0}
 
     torques = compute_joint_torques(config, pose, link_masses_g)
 
-    assert torques["shoulder_pitch_l"] == pytest.approx(-0.6548175, abs=1e-6)
+    assert torques["shoulder_pitch_l"] == pytest.approx(-0.3143124, abs=1e-6)
 
 
 def test_straight_down_arm_gives_zero_shoulder_torque(config):
@@ -113,16 +113,19 @@ def test_shoulder_torque_with_nonzero_waist_yaw_exercises_world_axis_projection(
     #
     # Pose: waist_yaw=45, shoulder_pitch_l=90, default (estimate_all_link_masses)
     # masses. Hand computation, done from scratch with a standalone numpy
-    # script (not by calling robot.dynamics) before encoding this assertion:
+    # script (not by calling robot.dynamics) before encoding this assertion,
+    # using the post-M9-defaults-update offsets (shoulder_pitch_l origin
+    # offset now (-125.21980673998821, 0, 250.43961347997643), elbow_pitch_l
+    # origin/end-effector offsets now both (0, 0, -120)):
     #   waist_pos = (0, 0, 500); R_waist = Rz(45)
-    #   shoulder_pos = waist_pos + Rz(45) @ (-150, 0, 300)
-    #                = (-106.066017178, -106.066017178, 800)
+    #   shoulder_pos = waist_pos + Rz(45) @ (-125.21980673998821, 0, 250.43961347997643)
+    #                = (-88.54377448471462, -88.54377448471462, 750.4396134799764)
     #   R_shoulder = Rz(45) @ Rx(90)
-    #   elbow_pos = shoulder_pos + R_shoulder @ (0, 0, -250)
-    #             = (-282.842712475, 70.710678119, 800)
+    #   elbow_pos = shoulder_pos + R_shoulder @ (0, 0, -120)
+    #             = (-173.39658822710032, -3.6909607423289117, 750.4396134799764)
     #   R_elbow = R_shoulder (elbow_pitch_l = 0)
-    #   hand_l_pos = elbow_pos + R_elbow @ (0, 0, -230)
-    #              = (-445.477272147, 233.345237791, 800)
+    #   hand_l_pos = elbow_pos + R_elbow @ (0, 0, -120)
+    #              = (-258.24940196948603, 81.1618530000568, 750.4396134799764)
     #
     #   axis_world(shoulder_pitch_l) = R_waist @ (1,0,0) = (cos45, sin45, 0)
     #     -- THIS is the projection under test: if the axis were left as the
@@ -130,18 +133,22 @@ def test_shoulder_torque_with_nonzero_waist_yaw_exercises_world_axis_projection(
     #     wrong direction and give a materially different (wrong) answer.
     #
     #   Downstream of shoulder_pitch_l: link "elbow_pitch_l" (shoulder->elbow
-    #   midpoint, mass ~185.153 g), link "hand_l_link" (elbow->hand_l
-    #   midpoint, mass ~170.340 g), and elbow_pitch_l's own motor (GIM4310-10,
-    #   217 g) at elbow_pos. shoulder_pitch_l's own motor sits at r=0.
-    #   Summing torque_about(shoulder_pos, axis_world, point, mass) over
-    #   those three contributions gives:
-    #     total = -1.3691656898498819 N*m
+    #   midpoint, length 120mm, mass ~88.873 g), link "hand_l_link"
+    #   (elbow->hand_l midpoint, length 120mm, mass ~88.873 g -- the two are
+    #   now the same length, hence the same mass), and elbow_pitch_l's own
+    #   motor (GIM4310-10, 217 g) at elbow_pos. shoulder_pitch_l's own motor
+    #   sits at r=0. Summing torque_about(shoulder_pos, axis_world, point,
+    #   mass) over those three contributions gives:
+    #     t_elbow_link  = -0.0523108243656176
+    #     t_hand_link   = -0.1569324730968528
+    #     t_elbow_motor = -0.2554524000000001
+    #     total = -0.46469569746247047 N*m
     masses = estimate_all_link_masses(config)
     pose = {"waist_yaw": 45.0, "shoulder_pitch_l": 90.0}
 
     torques = compute_joint_torques(config, pose, masses)
 
-    assert torques["shoulder_pitch_l"] == pytest.approx(-1.3691656898498819, abs=1e-6)
+    assert torques["shoulder_pitch_l"] == pytest.approx(-0.46469569746247047, abs=1e-6)
 
 
 def test_elbow_pitch_l_torque_matches_hand_computation(config):
@@ -151,25 +158,26 @@ def test_elbow_pitch_l_torque_matches_hand_computation(config):
     # nonzero lever arm about elbow_pitch_l's own axis.
     #
     # Hand computation (standalone numpy script, independent of
-    # robot.dynamics):
-    #   shoulder_pos = (-150, 0, 800); R_shoulder = Rx(90)
-    #   elbow_pos = shoulder_pos + Rx(90) @ (0,0,-250) = (-150, 250, 800)
+    # robot.dynamics), using the post-M9-defaults-update elbow_pitch_l
+    # origin/end-effector offsets of (0, 0, -120) each (was -250/-230):
+    #   shoulder_pos = (-125.21980673998821, 0, 750.4396134799764); R_shoulder = Rx(90)
+    #   elbow_pos = shoulder_pos + Rx(90) @ (0,0,-120) = shoulder_pos + (0, 120, 0)
     #   R_elbow = R_shoulder (elbow_pitch_l angle = 0)
-    #   hand_l_pos = elbow_pos + R_elbow @ (0,0,-230) = (-150, 480, 800)
+    #   hand_l_pos = elbow_pos + R_elbow @ (0,0,-120) = elbow_pos + (0, 120, 0)
     #   midpoint = (elbow_pos + hand_l_pos) / 2; r = midpoint - elbow_pos
-    #            = (0, 115, 0) mm = (0, 0.115, 0) m
+    #            = (0, 60, 0) mm = (0, 0.06, 0) m
     #   axis_world(elbow_pitch_l) = R_shoulder @ (1,0,0) = (1,0,0)
     #     (Rx leaves the X axis itself unchanged, so this stays (1,0,0)
     #     regardless of the shoulder angle -- unlike the shoulder's own axis
     #     in the waist-yaw test above.)
-    #   mass(hand_l_link) [defaults] = 170.34049161983306 g = 0.17034... kg
-    #   F = (0, 0, -0.17034049161983306*9.81) N
-    #   r x F = (0.115 * F_z, 0, 0); dot with (1,0,0) = 0.115 * F_z
-    #         = -0.19216962562091466 N*m
+    #   mass(hand_l_link) [defaults, length 120mm] = 88.87329997556506 g = 0.08887... kg
+    #   F = (0, 0, -0.08887329997556506*9.81) N
+    #   r x F = (0.06 * F_z, 0, 0); dot with (1,0,0) = 0.06 * F_z
+    #         = -0.0523108243656176 N*m
     masses = estimate_all_link_masses(config)
     torques = compute_joint_torques(config, {"shoulder_pitch_l": 90.0}, masses)
 
-    assert torques["elbow_pitch_l"] == pytest.approx(-0.19216962562091466, abs=1e-6)
+    assert torques["elbow_pitch_l"] == pytest.approx(-0.0523108243656176, abs=1e-6)
 
 
 def test_elbow_pitch_r_torque_matches_mirrored_hand_computation(config):
@@ -182,7 +190,7 @@ def test_elbow_pitch_r_torque_matches_mirrored_hand_computation(config):
     masses = estimate_all_link_masses(config)
     torques = compute_joint_torques(config, {"shoulder_pitch_r": 90.0}, masses)
 
-    assert torques["elbow_pitch_r"] == pytest.approx(-0.19216962562091466, abs=1e-6)
+    assert torques["elbow_pitch_r"] == pytest.approx(-0.0523108243656176, abs=1e-6)
 
 
 def test_neck_pitch_torque_matches_hand_computation(config):
@@ -193,22 +201,24 @@ def test_neck_pitch_torque_matches_hand_computation(config):
     # nonzero lever arm.
     #
     # Hand computation (standalone numpy script, independent of
-    # robot.dynamics):
+    # robot.dynamics), using the post-M9-defaults-update neck_yaw->neck_pitch
+    # offset of (0,0,25) (was (0,0,60)) and neck_pitch->head offset of
+    # (0,0,86) (was (0,0,100)):
     #   neck_yaw_pos = (0, 0, 800); R_neck_yaw = I (neck_yaw angle = 0)
-    #   neck_pitch_pos = neck_yaw_pos + I @ (0,0,60) = (0, 0, 860)
+    #   neck_pitch_pos = neck_yaw_pos + I @ (0,0,25) = (0, 0, 825)
     #   R_neck_pitch = R_neck_yaw @ Rx(45) = Rx(45)
-    #   head_pos = neck_pitch_pos + Rx(45) @ (0,0,100)
-    #            = (0, -70.71067812, 930.71067812)
+    #   head_pos = neck_pitch_pos + Rx(45) @ (0,0,86)
+    #            = (0, -60.81118318204309, 885.8111831820431)
     #   midpoint = (neck_pitch_pos + head_pos) / 2
-    #   r = midpoint - neck_pitch_pos = (0, -35.35533906, 35.35533906) mm
+    #   r = midpoint - neck_pitch_pos = (0, -30.405591591021543, 30.40559159102156) mm
     #   axis_world(neck_pitch) = R_neck_yaw @ (1,0,0) = (1,0,0)
-    #   mass(head_link) [defaults] = 74.0610833129709 g = 0.074061... kg
-    #   F = (0, 0, -0.0740610833129709*9.81) N
-    #   torque_about = dot(r/1000 x F, (1,0,0)) = 0.025687040721101867 N*m
+    #   mass(head_link) [defaults, length 86mm] = 63.69253164915496 g = 0.06369... kg
+    #   F = (0, 0, -0.06369253164915496*9.81) N
+    #   torque_about = dot(r/1000 x F, (1,0,0)) = 0.01899813531732694 N*m
     masses = estimate_all_link_masses(config)
     torques = compute_joint_torques(config, {"neck_pitch": 45.0}, masses)
 
-    assert torques["neck_pitch"] == pytest.approx(0.025687040721101867, abs=1e-6)
+    assert torques["neck_pitch"] == pytest.approx(0.01899813531732694, abs=1e-6)
 
 
 def test_link_mass_loads_parent_joint_not_itself(config):
@@ -237,26 +247,27 @@ def test_payload_mass_adds_point_load_at_end_effector(config):
     # test_neck_pitch_torque_matches_hand_computation above.
     #
     # Hand computation (standalone numpy script, independent of
-    # robot.dynamics):
-    #   neck_pitch_pos = (0, 0, 860)
-    #   head_pos = (0, -70.71067812, 930.71067812)   [Rx(45) @ (0,0,100)]
+    # robot.dynamics), using the post-M9-defaults-update offsets (see
+    # test_neck_pitch_torque_matches_hand_computation above):
+    #   neck_pitch_pos = (0, 0, 825)
+    #   head_pos = (0, -60.81118318204309, 885.8111831820431)   [Rx(45) @ (0,0,86)]
     #   axis_world(neck_pitch) = (1, 0, 0)
-    #   link-only contribution (head_link mass = 74.0610833129709 g) =
-    #     0.025687040721101867 N*m [see test above]
+    #   link-only contribution (head_link mass = 63.69253164915496 g) =
+    #     0.01899813531732694 N*m [see test above]
     #   payload contribution (500 g at head_pos exactly,
-    #     r = head_pos - neck_pitch_pos = (0, -0.07071067812, 0.07071067812) m):
+    #     r = head_pos - neck_pitch_pos = (0, -0.06081118318204309, 0.06081118318204309) m):
     #     F = (0, 0, -0.5*9.81) = (0, 0, -4.905)
-    #     torque_about = dot(r x F, (1,0,0)) = 0.34683587617200157 N*m
-    #   total = 0.025687040721101867 + 0.34683587617200157
-    #         = 0.37252291689310346 N*m
+    #     torque_about = dot(r x F, (1,0,0)) = 0.2982788535079214 N*m
+    #   total = 0.01899813531732694 + 0.2982788535079214
+    #         = 0.3172769888252483 N*m
     masses = estimate_all_link_masses(config)
     pose = {"neck_pitch": 45.0}
 
     without_payload = compute_joint_torques(config, pose, masses)
     with_payload = compute_joint_torques(config, pose, masses, payload_mass_g={"head": 500.0})
 
-    assert without_payload["neck_pitch"] == pytest.approx(0.025687040721101867, abs=1e-6)
-    assert with_payload["neck_pitch"] == pytest.approx(0.37252291689310346, abs=1e-6)
+    assert without_payload["neck_pitch"] == pytest.approx(0.01899813531732694, abs=1e-6)
+    assert with_payload["neck_pitch"] == pytest.approx(0.3172769888252483, abs=1e-6)
 
     # A payload on a different end effector must not affect neck_pitch.
     hand_payload_only = compute_joint_torques(config, pose, masses, payload_mass_g={"hand_l": 500.0})

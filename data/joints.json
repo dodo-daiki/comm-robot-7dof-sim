@@ -29,20 +29,20 @@
       "parent": "neck_yaw",
       "part_ja": "首ピッチ",
       "axis": [1, 0, 0],
-      "origin_offset_mm": [0, 0, 60],
+      "origin_offset_mm": [0, 0, 25],
       "range_deg": [-30, 45],
       "motor": "GIM4310-10",
       "gear_ratio": 10,
       "can_id": "TODO",
       "end_effector_name": "head",
-      "end_effector_offset_mm": [0, 0, 100]
+      "end_effector_offset_mm": [0, 0, 86]
     },
     {
       "name": "shoulder_pitch_l",
       "parent": "waist_yaw",
       "part_ja": "左肩ピッチ",
       "axis": [1, 0, 0],
-      "origin_offset_mm": [-150, 0, 300],
+      "origin_offset_mm": [-125.21980673998821, 0, 250.43961347997643],
       "range_deg": [-90, 150],
       "motor": "GIM4310-10",
       "gear_ratio": 10,
@@ -53,20 +53,20 @@
       "parent": "shoulder_pitch_l",
       "part_ja": "左肘ピッチ",
       "axis": [1, 0, 0],
-      "origin_offset_mm": [0, 0, -250],
+      "origin_offset_mm": [0, 0, -120],
       "range_deg": [0, 140],
       "motor": "GIM4310-10",
       "gear_ratio": 10,
       "can_id": "TODO",
       "end_effector_name": "hand_l",
-      "end_effector_offset_mm": [0, 0, -230]
+      "end_effector_offset_mm": [0, 0, -120]
     },
     {
       "name": "shoulder_pitch_r",
       "parent": "waist_yaw",
       "part_ja": "右肩ピッチ",
       "axis": [1, 0, 0],
-      "origin_offset_mm": [150, 0, 300],
+      "origin_offset_mm": [125.21980673998821, 0, 250.43961347997643],
       "range_deg": [-90, 150],
       "motor": "GIM4310-10",
       "gear_ratio": 10,
@@ -77,13 +77,13 @@
       "parent": "shoulder_pitch_r",
       "part_ja": "右肘ピッチ",
       "axis": [1, 0, 0],
-      "origin_offset_mm": [0, 0, -250],
+      "origin_offset_mm": [0, 0, -120],
       "range_deg": [0, 140],
       "motor": "GIM4310-10",
       "gear_ratio": 10,
       "can_id": "TODO",
       "end_effector_name": "hand_r",
-      "end_effector_offset_mm": [0, 0, -230]
+      "end_effector_offset_mm": [0, 0, -120]
     }
   ]
 }

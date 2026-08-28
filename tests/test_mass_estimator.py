@@ -96,8 +96,9 @@ def test_estimate_all_link_masses_covers_every_joint_and_end_effector():
     expected_neck_yaw = estimate_link_mass_g(300.0)
     assert masses["neck_yaw"] == pytest.approx(expected_neck_yaw)
 
-    # head_link comes from neck_pitch's end_effector_offset_mm = [0,0,100].
-    expected_head_link = estimate_link_mass_g(100.0)
+    # head_link comes from neck_pitch's end_effector_offset_mm = [0,0,86]
+    # (post-M9-defaults-update length; was [0,0,100]).
+    expected_head_link = estimate_link_mass_g(86.0)
     assert masses["head_link"] == pytest.approx(expected_head_link)
 
 
