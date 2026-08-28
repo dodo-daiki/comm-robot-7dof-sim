@@ -721,20 +721,20 @@ const ROBOT_CONFIG_DEFAULT = {
       mount_rx_deg: 0,
       mount_ry_deg: 0,
       mount_rz_deg: 0,
-      link_thickness_mm: 190 // = 2 * torsoRadius (torso capsule: waist_yaw -> neck_yaw)
+      link_thickness_mm: 180 // M9 defaults update (torso capsule: waist_yaw -> neck_yaw)
     },
     {
       name: "neck_pitch",
       parent: "neck_yaw",
       part_ja: "首ピッチ",
       axis: [1, 0, 0],
-      origin_offset_mm: [0, 0, 60],
+      origin_offset_mm: [0, 0, 25],
       range_deg: [-30, 45],
       motor: "GIM4310-10",
       gear_ratio: 10,
       can_id: "TODO",
       end_effector_name: "head",
-      end_effector_offset_mm: [0, 0, 100],
+      end_effector_offset_mm: [0, 0, 86],
       mount_rx_deg: 0,
       mount_ry_deg: 0,
       mount_rz_deg: 0,
@@ -746,7 +746,7 @@ const ROBOT_CONFIG_DEFAULT = {
       parent: "waist_yaw",
       part_ja: "左肩ピッチ",
       axis: [1, 0, 0],
-      origin_offset_mm: [-150, 0, 300],
+      origin_offset_mm: [-125.21980673998821, 0, 250.43961347997643],
       range_deg: [-90, 150],
       motor: "GIM4310-10",
       gear_ratio: 10,
@@ -765,25 +765,25 @@ const ROBOT_CONFIG_DEFAULT = {
       parent: "shoulder_pitch_l",
       part_ja: "左肘ピッチ",
       axis: [1, 0, 0],
-      origin_offset_mm: [0, 0, -250],
+      origin_offset_mm: [0, 0, -120],
       range_deg: [0, 140],
       motor: "GIM4310-10",
       gear_ratio: 10,
       can_id: "TODO",
       end_effector_name: "hand_l",
-      end_effector_offset_mm: [0, 0, -230],
+      end_effector_offset_mm: [0, 0, -120],
       mount_rx_deg: 0,
-      mount_ry_deg: 0,
+      mount_ry_deg: 20,
       mount_rz_deg: 0,
-      link_thickness_mm: 100, // = 2 * limbRadiusUpperArm (upperArmL capsule: shoulder_pitch_l -> elbow_pitch_l)
-      end_effector_thickness_mm: 84 // = 2 * limbRadiusForearm (forearmL capsule: elbow_pitch_l -> hand_l)
+      link_thickness_mm: 70, // M9 defaults update (upperArmL capsule: shoulder_pitch_l -> elbow_pitch_l)
+      end_effector_thickness_mm: 70 // M9 defaults update (forearmL capsule: elbow_pitch_l -> hand_l)
     },
     {
       name: "shoulder_pitch_r",
       parent: "waist_yaw",
       part_ja: "右肩ピッチ",
       axis: [1, 0, 0],
-      origin_offset_mm: [150, 0, 300],
+      origin_offset_mm: [125.21980673998821, 0, 250.43961347997643],
       range_deg: [-90, 150],
       motor: "GIM4310-10",
       gear_ratio: 10,
@@ -798,18 +798,18 @@ const ROBOT_CONFIG_DEFAULT = {
       parent: "shoulder_pitch_r",
       part_ja: "右肘ピッチ",
       axis: [1, 0, 0],
-      origin_offset_mm: [0, 0, -250],
+      origin_offset_mm: [0, 0, -120],
       range_deg: [0, 140],
       motor: "GIM4310-10",
       gear_ratio: 10,
       can_id: "TODO",
       end_effector_name: "hand_r",
-      end_effector_offset_mm: [0, 0, -230],
+      end_effector_offset_mm: [0, 0, -120],
       mount_rx_deg: 0,
-      mount_ry_deg: 0,
+      mount_ry_deg: -20,
       mount_rz_deg: 0,
-      link_thickness_mm: 100, // = 2 * limbRadiusUpperArm
-      end_effector_thickness_mm: 84 // = 2 * limbRadiusForearm
+      link_thickness_mm: 70, // M9 defaults update
+      end_effector_thickness_mm: 70 // M9 defaults update
     }
   ]
 };
@@ -1642,7 +1642,7 @@ scene.add(torso);
 // in buildSkeletonPartsPanel, Section 7E). clavicleRadius below remains
 // only this mesh's INITIAL placeholder size before the first render().
 const clavicleRadius = 44;
-let CLAVICLE_THICKNESS_MM = 88; // diameter, mm -- matches the pre-M6 blended default (both shoulders started at 88 too)
+let CLAVICLE_THICKNESS_MM = 80; // diameter, mm -- M9 defaults update (was 88)
 const clavicle = makePlaceholderCapsule(clavicleRadius, mannequinMat, "clavicle");
 scene.add(clavicle);
 
@@ -1687,8 +1687,8 @@ for (const j of JOINTS) {
 // HAND_RADIUS_MM (M6): independently editable per side (was one shared
 // hardcoded constant); handRadius below remains only the initial
 // placeholder size before the first render().
-const handRadius = 46;
-let HAND_RADIUS_MM = { l: 46, r: 46 };
+const handRadius = 40;
+let HAND_RADIUS_MM = { l: 40, r: 40 }; // M9 defaults update (was 46/46)
 const handL = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat.clone());
 const handR = new THREE.Mesh(new THREE.SphereGeometry(handRadius, 16, 14), mannequinMat.clone());
 handL.castShadow = true;
@@ -1716,8 +1716,8 @@ scene.add(handL, handR);
 // HEAD_RADIUS_MM (M6): now genuinely user-editable (was a hardcoded
 // constant never exposed anywhere) via the 「骨格パーツ」/頭部 entry.
 // headRadius below remains only this mesh's initial placeholder size.
-const headRadius = 105;
-let HEAD_RADIUS_MM = 105;
+const headRadius = 100;
+let HEAD_RADIUS_MM = 100; // M9 defaults update (was 105)
 const head = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 32, 24), headMat.clone());
 head.castShadow = true;
 head.receiveShadow = true;
@@ -2061,7 +2061,7 @@ const rangeMinInputs = {};
 const rangeMaxInputs = {};
 const motorSelects = {};
 const axisSelects = {};
-const mountInputs = {}; // { [jointName]: { rx, ry, rz } }, each an entry from makeValidatedNumberInput
+const mountInputs = {}; // { [jointName]: [{ rx, ry, rz }, ...] } -- an ARRAY since M9 (elbow_pitch_l/r now register two sibling entries, one under 上腕/upper-arm and one under 前腕/forearm, kept in sync -- see addMountAngleField/syncMountInputs, Section 7E); every field ({rx,ry,rz}) is itself an entry from makeValidatedNumberInput
 const thicknessInputs = {}; // main (incoming) link thickness, from makeValidatedNumberInput
 const eeThicknessInputs = {}; // end-effector link thickness (leaf joints only)
 const thicknessHintEls = {}; // clickable "recommended thickness" hint buttons
@@ -2941,10 +2941,10 @@ document.getElementById("reset-btn").addEventListener("click", () => {
     rangeMaxInputs[j.name].value = String(def.range_deg[1]);
     motorSelects[j.name].value = def.motor;
     axisSelects[j.name].value = axisToLabel(def.axis);
-    if (mountInputs[j.name]) {
-      mountInputs[j.name].rx.setExternally(def.mount_rx_deg);
-      mountInputs[j.name].ry.setExternally(def.mount_ry_deg);
-      mountInputs[j.name].rz.setExternally(def.mount_rz_deg);
+    for (const entry of mountInputs[j.name] || []) {
+      entry.rx.setExternally(def.mount_rx_deg);
+      entry.ry.setExternally(def.mount_ry_deg);
+      entry.rz.setExternally(def.mount_rz_deg);
     }
   }
   // Payload mass (M5, Section 7D) resets WITH the design parameters --
@@ -2968,14 +2968,14 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   HAND_OWN_MASS_G.hand_r = 0;
   handOwnMassInputs.hand_l.setExternally(0);
   handOwnMassInputs.hand_r.setExternally(0);
-  CLAVICLE_THICKNESS_MM = 88;
-  clavicleThicknessInput.setExternally(88);
-  HEAD_RADIUS_MM = 105;
-  headSizeInput.setExternally(105);
-  HAND_RADIUS_MM.l = 46;
-  HAND_RADIUS_MM.r = 46;
-  handSizeInputs.l.setExternally(46);
-  handSizeInputs.r.setExternally(46);
+  CLAVICLE_THICKNESS_MM = 80;
+  clavicleThicknessInput.setExternally(80);
+  HEAD_RADIUS_MM = 100;
+  headSizeInput.setExternally(100);
+  HAND_RADIUS_MM.l = 40;
+  HAND_RADIUS_MM.r = 40;
+  handSizeInputs.l.setExternally(40);
+  handSizeInputs.r.setExternally(40);
   render();
 });
 
@@ -3490,13 +3490,18 @@ function updateTorqueDisplay() {
  * rotation, parent_rotation @ R_mount @ R_axis(angle), since the
  * end-effector transform is `world(J) @ translate-only`). There is only
  * ONE mount-rotation degree-of-freedom-set per joint -- it cannot be
- * meaningfully split into two independent controls. The editable control
- * is placed on the INCOMING-link part (首/neck for neck_pitch, 上腕/
- * upper-arm for elbow_pitch_l/r), where R_mount acts alone without being
- * entangled with the joint's own pose angle; the end-effector-link part
- * (頭部支持/head-mount, 前腕/forearm) shows a read-only note instead of a
- * second, fabricated control that doesn't correspond to an independent
- * value in the actual math.
+ * meaningfully split into two independent controls, but that no longer
+ * means only one of the two body parts sharing it gets an editable field:
+ * neck_pitch's incoming-link part (首/neck) owns the sole editable control,
+ * with its end-effector-link part (頭部支持/head-mount) still showing a
+ * read-only note -- but elbow_pitch_l/r (M9) now gets a SECOND editable
+ * control, on 前腕/forearm (its end-effector-link part), wired to the exact
+ * same joint.mount_r{x,y,z}_deg the 上腕/upper-arm control already edits
+ * (see addMountAngleField/syncMountInputs, mountInputs[jointName] holding
+ * an array of sibling controls) -- not a second independent value, just a
+ * second place to edit the one real value, with both displays kept in
+ * sync. neck_pitch was deliberately left as-is (still a single control):
+ * this change only had to cover elbow_pitch_l/r per the M9 brief.
  *
  * CONSTRAINT: per the M6 brief, jointTransform/forwardKinematics/
  * jointAxisWorld/computeJointTorques internals are NOT touched by this
@@ -3716,6 +3721,23 @@ function makeWeightOverrideInputComponent(initialOverride, onChange) {
   return { input, hint, wrap, setExternally, updateHint };
 }
 
+// Pushes every sibling control's displayed value in sync whenever ONE of
+// them commits an edit -- e.g. elbow_pitch_l's mount angle now has TWO
+// controls (under 上腕/upper-arm AND 前腕/forearm, see the section header's
+// "MOUNT-ANGLE SPLITTING DECISION" update below), both bound to the exact
+// same joint.mount_r{x,y,z}_deg value; editing either one must visibly
+// update the other immediately. mountInputs[jointName] therefore holds an
+// ARRAY of { rx, ry, rz } entries (one per addMountAngleField call for that
+// joint), not a single entry -- reset-to-defaults and design-import below
+// loop over the array instead of indexing it directly.
+function syncMountInputs(jointName, entryKey, v, sourceEntry) {
+  const entries = mountInputs[jointName] || [];
+  for (const e of entries) {
+    if (e === sourceEntry) continue;
+    e[entryKey].setExternally(v);
+  }
+}
+
 function addMountAngleField(p, joint, labelText) {
   const field = p.addField(labelText || "取付角度 (deg)");
   const pair = document.createElement("div");
@@ -3731,13 +3753,17 @@ function addMountAngleField(p, joint, labelText) {
     tag.className = "axis-tag";
     tag.textContent = label;
     pair.appendChild(tag);
-    const created = makeValidatedNumberInput(joint[key], -180, 180, (v) => { joint[key] = v; });
+    const created = makeValidatedNumberInput(joint[key], -180, 180, (v) => {
+      joint[key] = v;
+      syncMountInputs(joint.name, entryKey, v, entry);
+    });
     created.input.className = "narrow";
     pair.appendChild(created.input);
     entry[entryKey] = created;
   }
   field.appendChild(pair);
-  mountInputs[joint.name] = entry;
+  if (!mountInputs[joint.name]) mountInputs[joint.name] = [];
+  mountInputs[joint.name].push(entry);
   return entry;
 }
 
@@ -3849,13 +3875,26 @@ for (const [side, jointName, label] of [["l", "elbow_pitch_l", "上腕 (左, upp
 // No weight field of its own: its underlying mass (hand_l_link/
 // hand_r_link) is presented under 手/hand instead, alongside 手's own
 // additive extra mass -- see the section header's CONSTRAINT note.
+//
+// Mount angle (M9): now a SECOND editable control on the exact same
+// elbow_pitch_l/r.mount_r{x,y,z}_deg value already edited under 上腕/
+// upper-arm above -- addMountAngleField (see its own comment) registers
+// both controls under mountInputs[jointName] and keeps them mutually in
+// sync (editing either one immediately updates the other's displayed
+// value), since there is only ONE underlying mount-rotation
+// degree-of-freedom-set per joint (see the section header's "MOUNT-ANGLE
+// SPLITTING DECISION" -- that reasoning about there being one real value
+// still holds; what changed is that both the incoming-link AND the
+// end-effector-link parts now get a genuine control on it instead of the
+// end-effector side getting only a read-only note).
 for (const [side, jointName, eeName, label] of [["l", "elbow_pitch_l", "hand_l", "前腕 (左, forearm L)"], ["r", "elbow_pitch_r", "hand_r", "前腕 (右, forearm R)"]]) {
   const p = addPartDetails("forearm_" + side, label);
   eeLengthInputs[jointName] = addLengthField(p, jointName, () => JOINTS_BY_NAME[jointName].end_effector_offset_mm, setEndEffectorLength, "長さ (mm)");
   const t = addThicknessField(p, jointName, JOINTS_BY_NAME[jointName].end_effector_thickness_mm, setEndEffectorThickness);
   eeThicknessInputs[jointName] = t.thickness;
   eeThicknessHintEls[jointName] = t.hint;
-  p.addInfoRow("重量は「手」パーツにまとめて表示されます。取付角度は「上腕」パーツの設定がこのリンクの向きにも影響します。");
+  p.addInfoRow("重量は「手」パーツにまとめて表示されます。");
+  addMountAngleField(p, JOINTS_BY_NAME[jointName]);
 }
 
 // ---- 手 (hand) L/R: the hand sphere, not a link ----
@@ -4284,17 +4323,17 @@ function applyFullDesignState(result) {
         j.motor = e.motor;
         motorSelects[name].value = e.motor;
       }
-      if (e.mount_rx_deg !== undefined && mountInputs[name]) {
+      if (e.mount_rx_deg !== undefined) {
         j.mount_rx_deg = e.mount_rx_deg;
-        mountInputs[name].rx.setExternally(e.mount_rx_deg);
+        for (const entry of mountInputs[name] || []) entry.rx.setExternally(e.mount_rx_deg);
       }
-      if (e.mount_ry_deg !== undefined && mountInputs[name]) {
+      if (e.mount_ry_deg !== undefined) {
         j.mount_ry_deg = e.mount_ry_deg;
-        mountInputs[name].ry.setExternally(e.mount_ry_deg);
+        for (const entry of mountInputs[name] || []) entry.ry.setExternally(e.mount_ry_deg);
       }
-      if (e.mount_rz_deg !== undefined && mountInputs[name]) {
+      if (e.mount_rz_deg !== undefined) {
         j.mount_rz_deg = e.mount_rz_deg;
-        mountInputs[name].rz.setExternally(e.mount_rz_deg);
+        for (const entry of mountInputs[name] || []) entry.rz.setExternally(e.mount_rz_deg);
       }
       if (e.length_mm !== undefined) {
         setLinkLength(name, e.length_mm);
