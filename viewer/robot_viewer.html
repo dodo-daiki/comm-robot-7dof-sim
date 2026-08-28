@@ -522,6 +522,26 @@
     font-variant-numeric: tabular-nums;
     color: #444;
   }
+  /* Hardware-feasibility warning (Section 7F): a motor's real housing
+     dimensions (MOTOR_SPECS) don't physically fit against the link/part
+     geometry the user has configured (e.g. a link shorter than the
+     motor's own housing length, or a motor overlapping a neighboring
+     rendered part like the head). Hidden by default; toggled .active by
+     updateFeasibilityWarnings(), called from every render(). */
+  .feasibility-warning {
+    display: none;
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: #fdecea;
+    border: 1px solid #e0a4a4;
+    color: #8a2f2f;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .feasibility-warning.active {
+    display: block;
+  }
   /* Brief highlight when a part's panel entry is scrolled-to/focused
      after clicking its mesh in the 3D view (Section 6) -- fades out on
      its own; cleared early if a DIFFERENT part is clicked before it
@@ -1652,9 +1672,17 @@ scene.add(clavicle);
 // neck at the old radius (40mm) buried the neck_pitch motor's sideways-
 // pointing rotation pin entirely, which was the direct cause of neck_yaw
 // being a total visual no-op (nothing asymmetric was ever exposed to
-// visibly swing when the yaw joint rotated). A slim neck plus a smaller
-// head (see headRadius below) leaves that pin -- and the visible neck
-// silhouette itself -- clear of both the torso and the head.
+// visibly swing when the yaw joint rotated). A slim neck leaves that pin
+// -- and the visible neck silhouette itself -- clear of the torso.
+//
+// CORRECTION (post-M9 defaults update): the "and clear of the head too"
+// half of this claim, as originally written, stopped being true once the
+// M9 defaults update shortened neck_pitch's own incoming link
+// (origin_offset_mm) to 25mm -- see the headRadius comment below for the
+// actual measured numbers and the render-only nudge applied to reduce
+// (not eliminate) the resulting visual overlap, and Section 7F
+// (updateFeasibilityWarnings) for the live hardware-feasibility warning
+// that now flags this for real, in the UI, whenever it's still true.
 const limbRadiusUpperArm = 50;
 const limbRadiusForearm = 42;
 const limbRadiusNeck = 24;
@@ -1666,6 +1694,22 @@ const forearmR = makePlaceholderCapsule(limbRadiusForearm, mannequinMat, "forear
 const neckLower = makePlaceholderCapsule(limbRadiusNeck, mannequinMat, "neck");
 const neckUpper = makePlaceholderCapsule(limbRadiusNeck * 0.9, mannequinMat, "head_mount");
 scene.add(upperArmL, forearmL, upperArmR, forearmR, neckLower, neckUpper);
+
+// COSMETIC, RENDER-ONLY mitigation for the neck_yaw/neck_pitch motor-vs-
+// head visual overlap documented in the headRadius comment below: pushes
+// ONLY those two motors' rendered MESH positions a few mm further from
+// the head center (along the real, per-render FK direction from head to
+// that joint, so it still looks right at any pose, not just zero pose).
+// This touches NOTHING but where the cylinder mesh is drawn -- not
+// origin_offset_mm, not any FK transform, not link lengths/capsule
+// endpoints, not the torque calc, not updateFeasibilityWarnings (Section
+// 7F), which all keep using the real, un-nudged geometry. It is a small
+// enough amount to keep the default view from reading as badly broken
+// without pretending the underlying interference is fixed -- verified
+// (see the render-only-nudge investigation) to reduce, not eliminate,
+// the measured overlap: neck_yaw's ~15.5mm surface overlap drops to
+// ~0.5mm, neck_pitch's ~40.5mm drops to ~25.5mm.
+const NECK_MOTOR_HEAD_VISUAL_NUDGE_MM = 15;
 
 // ---- motor cylinders: one real-scale actuator per joint (Section C) ----
 // These ARE the joint markers -- no separate ball-joint sphere on top, for
@@ -1706,13 +1750,38 @@ scene.add(handL, handR);
 // meaningful, user-editable dimensions in the detail panel.
 //
 // Sized so it still reads as an exaggerated "big head" chibi proportion
-// without engulfing the neck: at zero pose the head's bottom edge
-// (headZ - headRadius) sits above neck_pitch's own position, leaving the
-// neck_pitch motor and a visible sliver of the neck capsules clear of the
-// head, and well clear of the torso (an earlier, larger radius of 165mm
-// overlapped the torso capsule by over 100mm and fully swallowed both
-// neck motors, which was the direct cause of neck_yaw's rotation being
-// completely invisible -- see the limbRadiusNeck comment above).
+// without engulfing the neck: well clear of the torso (an earlier, larger
+// radius of 165mm overlapped the torso capsule by over 100mm and fully
+// swallowed both neck motors, which was the direct cause of neck_yaw's
+// rotation being completely invisible -- see the limbRadiusNeck comment
+// above).
+//
+// CORRECTION -- the "leaving the neck_pitch motor... clear of the head"
+// half of the claim this comment used to make here is FALSE at the
+// current (M9) defaults and understated a real problem when it was first
+// investigated. Measured at zero pose with the current defaults (neck_yaw
+// origin_offset_mm z=300, neck_pitch's own incoming link only 25mm,
+// end_effector_offset_mm z=86, HEAD_RADIUS_MM=100, both neck motors are
+// GIM4310-10 => 26.5mm radius):
+//   - neck_yaw motor center is 111mm from the head center; its housing
+//     SURFACE overlaps the head sphere's surface by ~15.5mm (not a mere
+//     "few mm tip" -- a genuine chunk of the motor housing sits inside
+//     the head sphere).
+//   - neck_pitch motor center is only 86mm from the head center, i.e.
+//     LESS than HEAD_RADIUS_MM (100mm) -- the motor's entire center point
+//     sits inside the head sphere, with the housing surface overlapping
+//     by ~40.5mm.
+// Both are real hardware-feasibility problems (neck_pitch's own 25mm
+// incoming link is shorter than the GIM4310-10's own 32mm housing
+// length), not just a rendering nitpick -- see updateFeasibilityWarnings
+// (Section 7F), which computes and displays exactly this, live, in each
+// joint's panel, independent of anything below. NECK_MOTOR_HEAD_VISUAL_
+// NUDGE_MM below is a SEPARATE, purely cosmetic, render-only mitigation
+// (nudges the neck_yaw/neck_pitch motor MESHES a few mm further from the
+// head so the default view doesn't look quite this broken) -- it changes
+// no kinematics, no link length, and does not make the warning above go
+// away, nor should it: the underlying link-length defaults were set by
+// the user and are left as-is here.
 // HEAD_RADIUS_MM (M6): now genuinely user-editable (was a hardcoded
 // constant never exposed anywhere) via the 「骨格パーツ」/頭部 entry.
 // headRadius below remains only this mesh's initial placeholder size.
@@ -1827,7 +1896,19 @@ function render() {
     const mountedAxisLocal = rotateOnly(mountRotation, j.axis);
     const axisRobot = rotateOnly(parentWorld, mountedAxisLocal);
     const axisThree = robotToThree(axisRobot).normalize();
-    const jointPosThree = robotToThree(worldPosition(T[j.name]));
+    let jointPosThree = robotToThree(worldPosition(T[j.name]));
+    // NECK_MOTOR_HEAD_VISUAL_NUDGE_MM (see its own comment, Section 4):
+    // cosmetic-only displacement of just these two motors' MESH position,
+    // away from the head's CURRENT (this render's, any-pose) position --
+    // never touches jointPosThree's use anywhere else, nor T/JOINTS, so
+    // nothing downstream of this loop (capsules, torque, feasibility
+    // warnings) sees it.
+    if (j.name === "neck_yaw" || j.name === "neck_pitch") {
+      const awayFromHead = new THREE.Vector3().subVectors(jointPosThree, pHead);
+      if (awayFromHead.lengthSq() > 1e-6) {
+        jointPosThree = jointPosThree.clone().add(awayFromHead.normalize().multiplyScalar(NECK_MOTOR_HEAD_VISUAL_NUDGE_MM));
+      }
+    }
     orientAlongDirection(motorMeshes[j.name], jointPosThree, axisThree);
   }
 
@@ -1876,6 +1957,10 @@ function render() {
   // render() itself is never CALLED until the whole script (Section 7D
   // included) has finished running.
   updateTorqueDisplay();
+
+  // hardware-feasibility warnings (Section 7F) -- same hoisted-forward-
+  // reference/live-refresh pattern as updateTorqueDisplay above.
+  updateFeasibilityWarnings();
 }
 
 /* =====================================================================
@@ -2067,6 +2152,7 @@ const eeThicknessInputs = {}; // end-effector link thickness (leaf joints only)
 const thicknessHintEls = {}; // clickable "recommended thickness" hint buttons
 const eeThicknessHintEls = {};
 const torqueFieldEls = {}; // { [jointName]: { pill, text } }, per-joint torque display (M5, Section 7D)
+const feasibilityWarningEls = {}; // { [jointName]: { wrap, text } }, hardware-feasibility warning (Section 7F)
 
 // Briefly flags a rejected/invalid detail-panel edit with an error style,
 // then clears it -- used so a rejected input doesn't just silently look
@@ -2166,6 +2252,120 @@ function updateThicknessHints() {
       const rec = recommendedThicknessMm(vecLen(j.end_effector_offset_mm));
       eeHint.textContent = "推奨: 約" + rec + "mm (目安値)";
       eeHint.dataset.recommended = String(rec);
+    }
+  }
+}
+
+/* =====================================================================
+ * SECTION 7F: HARDWARE-FEASIBILITY WARNINGS
+ * ---------------------------------------------------------------------
+ * A joint's real motor (MOTOR_SPECS -- actual outer-case diameter_mm/
+ * length_mm, the same numbers Section 4's motor cylinders are sized
+ * from) can be physically impossible to mount given the link
+ * lengths/motor choice the user has configured, independent of whether
+ * the rendered placeholder geometry happens to visually clash. Two
+ * general, non-neck-specific rules, checked for EVERY joint on EVERY
+ * render():
+ *
+ *  A) INCOMING LINK SHORTER THAN THE MOTOR'S OWN HOUSING LENGTH -- if a
+ *     joint's incoming link (vecLen(origin_offset_mm), the same length
+ *     the 骨格パーツ panel's length field edits) is shorter than that
+ *     joint's own motor's length_mm, the motor's housing cannot
+ *     physically fit in the space the link geometry implies for it.
+ *     Skipped for joints with no rendered incoming link at all (a null
+ *     ORIGIN_OFFSET_DIRECTIONS entry -- currently just waist_yaw).
+ *
+ *  B) MOTOR HOUSING OVERLAPPING A NEIGHBORING RENDERED SPHERE PART --
+ *     approximates each joint's motor as a sphere of its own housing
+ *     diameter (a simplification -- the real housing is a cylinder, and
+ *     this ignores its length/orientation -- but a reasonable one for a
+ *     "does this look physically plausible" warning) and checks it
+ *     against the head/hand_l/hand_r end-effector spheres (the only
+ *     other rendered parts with a real radius). Flags an overlap if the
+ *     two spheres' surfaces would interpenetrate by more than
+ *     FEASIBILITY_OVERLAP_THRESHOLD_MM (a small tolerance so grazing/
+ *     near-touching geometry, which is fine in practice, doesn't nag).
+ *
+ * Both rules are evaluated at a FIXED NEUTRAL POSE (forwardKinematics
+ * called with an empty angles map, i.e. every joint at 0 deg) rather
+ * than currentAngles -- this is a check of the STATIC DESIGN geometry
+ * (will these physical parts fit together at all), not a live pose-
+ * dependent collision detector, so it doesn't flicker on/off as an
+ * animation plays and stays meaningful even while a joint's slider is
+ * at a non-zero angle.
+ *
+ * This runs entirely on the REAL, un-nudged geometry (JOINTS as edited
+ * by the user) -- it has no awareness of, and is not affected by,
+ * NECK_MOTOR_HEAD_VISUAL_NUDGE_MM (Section 4), which only moves where a
+ * couple of motor MESHES are drawn. That separation is intentional: the
+ * nudge is a cosmetic compromise for the default view; this warning is
+ * the honest, structural answer and must keep firing regardless of it.
+ * ===================================================================== */
+
+// End-effector "sphere parts" a motor's housing can overlap into. Radius
+// getters are functions (not captured values) since HEAD_RADIUS_MM/
+// HAND_RADIUS_MM.l/.r are user-editable and can change after this array
+// is built.
+const FEASIBILITY_SPHERE_PARTS = [
+  { label: "頭部", endEffectorName: "head", radiusFn: () => HEAD_RADIUS_MM },
+  { label: "左手", endEffectorName: "hand_l", radiusFn: () => HAND_RADIUS_MM.l },
+  { label: "右手", endEffectorName: "hand_r", radiusFn: () => HAND_RADIUS_MM.r },
+];
+const FEASIBILITY_OVERLAP_THRESHOLD_MM = 2; // ignore trivial/near-zero overlaps
+
+// Returns an array of Japanese warning strings (no leading "⚠", added by
+// the caller) for one joint, given the neutral-pose FK transforms T0.
+function computeFeasibilityIssuesForJoint(j, T0) {
+  const issues = [];
+  const spec = MOTOR_SPECS[j.motor];
+
+  // Rule A
+  const dir = ORIGIN_OFFSET_DIRECTIONS[j.name];
+  if (dir) {
+    const linkLen = vecLen(j.origin_offset_mm);
+    if (spec.length_mm - linkLen > FEASIBILITY_OVERLAP_THRESHOLD_MM) {
+      issues.push(
+        "このリンク長(" + Math.round(linkLen) + "mm)はモーター本体(Ø" + spec.diameter_mm + "×" + spec.length_mm +
+        "mm)より短く、実機では物理的に干渉します。"
+      );
+    }
+  }
+
+  // Rule B
+  const motorRadius = spec.diameter_mm / 2;
+  const jointPos = worldPosition(T0[j.name]);
+  for (const part of FEASIBILITY_SPHERE_PARTS) {
+    const partPos = worldPosition(T0[part.endEffectorName]);
+    const dist = Math.hypot(jointPos[0] - partPos[0], jointPos[1] - partPos[1], jointPos[2] - partPos[2]);
+    const partRadius = part.radiusFn();
+    const overlap = motorRadius + partRadius - dist;
+    if (overlap > FEASIBILITY_OVERLAP_THRESHOLD_MM) {
+      issues.push(
+        "このモーター(Ø" + spec.diameter_mm + "mm)は" + part.label + "(半径" + Math.round(partRadius) +
+        "mm)と約" + Math.round(overlap) + "mmの重なりで物理的に干渉します。"
+      );
+    }
+  }
+
+  return issues;
+}
+
+// Refreshes every joint's feasibility-warning element. Called from
+// render() so it reacts live to link-length edits (骨格パーツ panel) and
+// motor-model changes (this panel's own select), same pattern as
+// updateThicknessHints/updateWeightHints/updateTorqueDisplay.
+function updateFeasibilityWarnings() {
+  const T0 = forwardKinematics(JOINTS, BASE_HEIGHT_MM, {}); // neutral pose (see section header)
+  for (const j of JOINTS) {
+    const el = feasibilityWarningEls[j.name];
+    if (!el) continue;
+    const issues = computeFeasibilityIssuesForJoint(j, T0);
+    if (issues.length === 0) {
+      el.wrap.classList.remove("active");
+      el.text.textContent = "";
+    } else {
+      el.wrap.classList.add("active");
+      el.text.textContent = issues.map((s) => "⚠ " + s).join(" ");
     }
   }
 }
@@ -2382,6 +2582,19 @@ function buildJointAccordion(j) {
     });
     field.appendChild(select);
     motorSelects[j.name] = select;
+  }
+
+  // hardware-feasibility warning (Section 7F) -- hidden unless this
+  // joint's motor/link-length combination is actually flagged; refreshed
+  // live on every render() so it reacts immediately to a motor change
+  // here or a link-length edit made in the 骨格パーツ panel.
+  {
+    const wrap = document.createElement("div");
+    wrap.className = "feasibility-warning";
+    const text = document.createElement("span");
+    wrap.appendChild(text);
+    body.appendChild(wrap);
+    feasibilityWarningEls[j.name] = { wrap, text };
   }
 
   // rotation axis
