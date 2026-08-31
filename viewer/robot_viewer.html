@@ -779,7 +779,7 @@ const ROBOT_CONFIG_DEFAULT = {
       // (Section 2). The shoulder pivot itself, and the clavicle geometry
       // derived from it, are now permanently independent of this value.
       mount_rx_deg: 0,
-      mount_ry_deg: 0,
+      mount_ry_deg: 20, // M12 defaults update (was 0)
       mount_rz_deg: 0,
       // clavicle capsule (shoulder_pitch_l <-> shoulder_pitch_r) is shared
       // between both shoulders; its rendered radius blends both joints'
@@ -805,7 +805,7 @@ const ROBOT_CONFIG_DEFAULT = {
       // shoulder -> elbow) or on this joint's own rotation/axis. See
       // mountAppliesToEndEffectorOnly (Section 2).
       mount_rx_deg: 0,
-      mount_ry_deg: 20,
+      mount_ry_deg: -10, // M12 defaults update (was 20)
       mount_rz_deg: 0,
       link_thickness_mm: 70, // M9 defaults update (upperArmL capsule: shoulder_pitch_l -> elbow_pitch_l)
       end_effector_thickness_mm: 70 // M9 defaults update (forearmL capsule: elbow_pitch_l -> hand_l)
@@ -823,7 +823,7 @@ const ROBOT_CONFIG_DEFAULT = {
       // M11 fix: same as shoulder_pitch_l above -- mount_r{x,y,z}_deg only
       // affects the world rotation handed down to elbow_pitch_r and beyond.
       mount_rx_deg: 0,
-      mount_ry_deg: 0,
+      mount_ry_deg: -20, // M12 defaults update (was 0)
       mount_rz_deg: 0,
       link_thickness_mm: 88 // = 2 * clavicleRadius (see shoulder_pitch_l comment above)
     },
@@ -842,7 +842,7 @@ const ROBOT_CONFIG_DEFAULT = {
       // M10 fix: same as elbow_pitch_l above -- mount_r{x,y,z}_deg applies
       // ONLY to end_effector_offset_mm (forearm, elbow -> hand_r).
       mount_rx_deg: 0,
-      mount_ry_deg: -20,
+      mount_ry_deg: 10, // M12 defaults update (was -20)
       mount_rz_deg: 0,
       link_thickness_mm: 70, // M9 defaults update
       end_effector_thickness_mm: 70 // M9 defaults update
