@@ -771,6 +771,13 @@ const ROBOT_CONFIG_DEFAULT = {
       motor: "GIM4310-10",
       gear_ratio: 10,
       can_id: "TODO",
+      // M11 fix: for this joint, mount_r{x,y,z}_deg no longer affects this
+      // joint's OWN position (origin_offset_mm direction) or its OWN
+      // motor-axis orientation -- it now ONLY affects the world rotation
+      // handed down to its child (elbow_pitch_l) and everything further
+      // down that arm (forearm, hand). See mountAppliesToChildOnly
+      // (Section 2). The shoulder pivot itself, and the clavicle geometry
+      // derived from it, are now permanently independent of this value.
       mount_rx_deg: 0,
       mount_ry_deg: 0,
       mount_rz_deg: 0,
@@ -813,6 +820,8 @@ const ROBOT_CONFIG_DEFAULT = {
       motor: "GIM4310-10",
       gear_ratio: 10,
       can_id: "TODO",
+      // M11 fix: same as shoulder_pitch_l above -- mount_r{x,y,z}_deg only
+      // affects the world rotation handed down to elbow_pitch_r and beyond.
       mount_rx_deg: 0,
       mount_ry_deg: 0,
       mount_rz_deg: 0,
@@ -989,6 +998,39 @@ function mountAppliesToEndEffectorOnly(jointName) {
   return jointName === "elbow_pitch_l" || jointName === "elbow_pitch_r";
 }
 
+// M11 FIX: for shoulder_pitch_l/shoulder_pitch_r ONLY, mount_r{x,y,z}_deg no
+// longer participates in the joint's OWN offset (translation, i.e. WHERE
+// THE SHOULDER PIVOT ITSELF SITS relative to the waist) or its OWN
+// axis/motor-housing orientation at all -- see every call site below that
+// branches on this (and on mountExcludedFromOwnAxis, which folds this
+// together with mountAppliesToEndEffectorOnly for the "own axis" case).
+// UNLIKE mountAppliesToEndEffectorOnly's elbow_pitch_l/r case, though, this
+// value MUST remain in the ROTATION this joint hands down to compute its
+// CHILD joint (elbow_pitch_l/elbow_pitch_r) and everything further down
+// that arm chain (forearm, hand) -- see jointTransformMountRotatesChildOnly
+// below for how that split is implemented. Root cause this fixes: with
+// R_mount baked into the shoulder's own effective_offset_local (= R_mount @
+// origin_offset_mm, the waist->shoulder vector), changing a shoulder's
+// mount angle moved WHERE THE SHOULDER PIVOT ITSELF SITS relative to the
+// waist/torso -- visibly shifting the clavicle geometry (whose length is
+// derived from the two shoulders' actual FK positions, see
+// computeLinkLengths' clavicle comment) -- instead of rotating the arm
+// attached to it, exactly the same class of bug as the M10 elbow fix above.
+// Every other joint (waist_yaw, neck_yaw, neck_pitch, elbow_pitch_l/r) is
+// unaffected by this predicate.
+function mountAppliesToChildOnly(jointName) {
+  return jointName === "shoulder_pitch_l" || jointName === "shoulder_pitch_r";
+}
+
+// Folds mountAppliesToEndEffectorOnly and mountAppliesToChildOnly together
+// for the one thing both of their joints have in common: this joint's OWN
+// rotation axis (what the motor cylinder is drawn aligned to, and what
+// torque-about-this-joint is dotted against in computeJointTorques) is
+// mount-FREE. Used by jointAxisWorld and the motor-cylinder render loop.
+function mountExcludedFromOwnAxis(jointName) {
+  return mountAppliesToEndEffectorOnly(jointName) || mountAppliesToChildOnly(jointName);
+}
+
 // Mirrors kinematics.py::joint_transform -- translate by origin_offset_mm,
 // THEN rotate: T @ R -- EXTENDED with an optional per-joint mount
 // rotation R_mount (see mountRotationMatrix4 above; identity when the
@@ -1014,6 +1056,31 @@ function jointTransform(axis, angleDeg, originOffsetMm, mountRotation) {
   T[3] = effectiveOffset[0];
   T[7] = effectiveOffset[1];
   T[11] = effectiveOffset[2];
+  const Raxis = rotationMatrix4(axis, angleDeg);
+  const R = mat4Multiply(mountRotation, Raxis);
+  return mat4Multiply(T, R);
+}
+
+// M11 FIX: for shoulder_pitch_l/r ONLY (see mountAppliesToChildOnly above),
+// this joint's own local transform needs a DIFFERENT split of R_mount than
+// jointTransform's single mountRotation param can express: the
+// TRANSLATION (effective_offset_local, i.e. where THIS joint's own pivot
+// sits relative to its parent) must use an IDENTITY mount, while the
+// ROTATION (this local transform's R block, which becomes part of
+// transforms[jointName] -- the parentWorld passed to this joint's CHILD,
+// elbow, in visit() below) must still include the real R_mount, exactly as
+// jointTransform's own R = mountRotation @ R_axis(axis, angleDeg) always
+// does. This is a safe split because a translate-then-rotate mat4
+// (mat4Multiply(T, R)) always has a translation column equal to T's own
+// translation and a rotation block equal to R's own rotation, regardless
+// of what the OTHER matrix's corresponding block contains -- so this is
+// simply jointTransform with the rotateOnly(mountRotation, ...) step on
+// the offset removed, nothing else differs.
+function jointTransformMountRotatesChildOnly(axis, angleDeg, originOffsetMm, mountRotation) {
+  const T = mat4Identity();
+  T[3] = originOffsetMm[0];
+  T[7] = originOffsetMm[1];
+  T[11] = originOffsetMm[2];
   const Raxis = rotationMatrix4(axis, angleDeg);
   const R = mat4Multiply(mountRotation, Raxis);
   return mat4Multiply(T, R);
@@ -1087,10 +1154,27 @@ function forwardKinematics(jointsList, baseHeightMm, jointAnglesDeg) {
     // down, between this mount-free worldRotation and end_effector_offset_mm.
     // Every other joint is unaffected: ownMountRotation === mountRotation and
     // eeMountRotation === identity, bit-for-bit the pre-M10 behavior.
+    //
+    // M11 FIX (see mountAppliesToChildOnly above): for shoulder_pitch_l/r,
+    // neither branch above applies -- this joint's own TRANSLATION
+    // (effective_offset_local) must be mount-free like an eeOnly joint, but
+    // its own world ROTATION (used as parentWorld for its CHILD, elbow,
+    // right below) must KEEP R_mount, unlike an eeOnly joint. This is
+    // exactly the opposite split from eeOnly, and is why it needs its own
+    // local-transform builder (jointTransformMountRotatesChildOnly) rather
+    // than reusing jointTransform with some choice of ownMountRotation --
+    // jointTransform couples the offset and the rotation to the SAME
+    // mountRotation argument, but here they need to use TWO different ones.
     const mountRotation = mountRotationMatrix4(joint);
     const eeOnly = mountAppliesToEndEffectorOnly(joint.name);
-    const ownMountRotation = eeOnly ? mat4Identity() : mountRotation;
-    const local = jointTransform(joint.axis, angle, joint.origin_offset_mm, ownMountRotation);
+    const childOnly = mountAppliesToChildOnly(joint.name);
+    let local;
+    if (childOnly) {
+      local = jointTransformMountRotatesChildOnly(joint.axis, angle, joint.origin_offset_mm, mountRotation);
+    } else {
+      const ownMountRotation = eeOnly ? mat4Identity() : mountRotation;
+      local = jointTransform(joint.axis, angle, joint.origin_offset_mm, ownMountRotation);
+    }
     const world = mat4Multiply(parentWorld, local);
     transforms[joint.name] = world;
 
@@ -1254,21 +1338,24 @@ function ancestorChainInclusive(byName, jointName) {
 // (Section 5): parent_rotation @ R_mount @ axis_local. At
 // mount_r{x,y,z}_deg = 0 (identity R_mount), this reduces to Python's
 // parent_rotation @ axis_local bit-for-bit, same reasoning as
-// jointTransform's own mount-rotation extension. M10 fix: for
-// elbow_pitch_l/r, R_mount is forced to identity here (see
-// mountAppliesToEndEffectorOnly) -- that joint's own rotation axis (what
-// torque-about-this-joint is measured against, and what the motor cylinder
-// is drawn aligned to) no longer follows its mount tilt at all.
+// jointTransform's own mount-rotation extension. M10/M11 fix: for
+// elbow_pitch_l/r AND shoulder_pitch_l/r, R_mount is forced to identity
+// here (see mountExcludedFromOwnAxis) -- that joint's own rotation axis
+// (what torque-about-this-joint is measured against, and what the motor
+// cylinder is drawn aligned to) no longer follows its own mount tilt at
+// all, for either pair of joints.
 function jointAxisWorld(joint, transforms, baseTransform) {
   const parentRotation = joint.parent !== null ? transforms[joint.parent] : baseTransform;
   const axisLen = vecLen(joint.axis);
   const axisUnit = [joint.axis[0] / axisLen, joint.axis[1] / axisLen, joint.axis[2] / axisLen];
-  // M10 FIX: elbow_pitch_l/r's OWN axis (what motor cylinders are drawn
-  // aligned to, and what torque-about-this-joint is dotted against) no
-  // longer includes R_mount -- see mountAppliesToEndEffectorOnly. The
-  // physical motor unit's own orientation is unaffected by this joint's
-  // mount-angle value now; only the forearm's attachment direction is.
-  const mountRotation = mountAppliesToEndEffectorOnly(joint.name) ? mat4Identity() : mountRotationMatrix4(joint);
+  // M10/M11 FIX: elbow_pitch_l/r's and shoulder_pitch_l/r's OWN axis (what
+  // motor cylinders are drawn aligned to, and what torque-about-this-joint
+  // is dotted against) no longer includes R_mount -- see
+  // mountExcludedFromOwnAxis. The physical motor unit's own orientation is
+  // unaffected by this joint's mount-angle value now; only whatever is
+  // downstream (forearm for the elbow, the whole arm from elbow on down for
+  // the shoulder) is.
+  const mountRotation = mountExcludedFromOwnAxis(joint.name) ? mat4Identity() : mountRotationMatrix4(joint);
   const mountedAxisLocal = rotateOnly(mountRotation, axisUnit);
   return rotateOnly(parentRotation, mountedAxisLocal);
 }
@@ -1509,14 +1596,19 @@ function computeLinkLengths() {
     // NOTE: clavicle (shoulder_pitch_l <-> shoulder_pitch_r) is NOT listed
     // here. Unlike every other capsule above, which spans a parent->child
     // pair (length-preserving under mount rotation, see the torso comment),
-    // the clavicle spans two SIBLINGS -- its true length is
-    // |R_mount_l.offset_l - R_mount_r.offset_r|, which does NOT reduce to
-    // the un-rotated |offset_l - offset_r| once either shoulder has a
-    // nonzero mount rotation. It's instead computed directly from the two
-    // shoulders' actual FK world positions in render() (same bug class as
-    // the "floating arms" issue fixed in 030d5b2 -- always derive a
+    // the clavicle spans two SIBLINGS -- it's instead computed directly from
+    // the two shoulders' actual FK world positions in render() (same bug
+    // class as the "floating arms" issue fixed in 030d5b2 -- always derive a
     // cross-branch span from real FK positions, never from raw config
-    // offsets minus each other).
+    // offsets minus each other). Before the M11 fix (mountAppliesToChildOnly,
+    // Section 2), this distinction actually mattered here: the true length
+    // was |R_mount_l.offset_l - R_mount_r.offset_r|, which does NOT reduce
+    // to the un-rotated |offset_l - offset_r| once either shoulder had a
+    // nonzero mount rotation. Since the M11 fix, shoulder_pitch_l/r's mount
+    // angle no longer affects offset_l/offset_r's EFFECTIVE (world) direction
+    // at all, so the two forms now always agree -- computing from FK
+    // positions here is kept anyway, both for robustness and because it's
+    // already what render() needs for the capsule's endpoints regardless.
     neck_upper: vecLen(JOINTS_BY_NAME.neck_pitch.origin_offset_mm), // neck_yaw -> neck_pitch
     neck_head: vecLen(JOINTS_BY_NAME.neck_pitch.end_effector_offset_mm), // neck_pitch -> head
     upper_arm_l: vecLen(JOINTS_BY_NAME.elbow_pitch_l.origin_offset_mm), // shoulder -> elbow
@@ -1913,9 +2005,12 @@ function render() {
   // clavicle: static connector bridging the torso top to both shoulders.
   // Length comes from the two shoulders' ACTUAL FK world positions (not
   // vecLen of their raw config offsets minus each other -- see the
-  // computeLinkLengths() comment) so a mount rotation on either shoulder
-  // can't pull it into a visible gap/overhang: this stays the true
-  // straight-line distance between where the shoulders really ended up.
+  // computeLinkLengths() comment). Since the M11 fix (mountAppliesToChildOnly,
+  // Section 2), shoulder_pitch_l/r's mount angle no longer moves their FK
+  // position at all, so this is now guaranteed mount-independent by
+  // construction; still computed from real FK positions (rather than raw
+  // config offsets) so it also stays correct if the two shoulders' LENGTHS
+  // ever differ or their offsets are edited directly.
   rebuildCapsule(clavicle, pShoulderL.distanceTo(pShoulderR), CLAVICLE_THICKNESS_MM / 2);
   orientBetween(clavicle, pShoulderL, pShoulderR);
   if (partReadonlyEls.clavicle_length) {
@@ -1940,16 +2035,19 @@ function render() {
   // axis, exactly mirroring the R_mount placement in jointTransform()
   // (Section 2) so a tilted mount visibly reorients the motor cylinder
   // even when the joint's own pose angle is 0 -- EXCEPT for elbow_pitch_l/r
-  // (M10 fix, see mountAppliesToEndEffectorOnly, Section 2), whose motor
-  // cylinder is drawn at its mount-FREE axis: that joint's mount-angle value
-  // no longer reorients the motor housing at all, only the forearm.
+  // (M10 fix) and shoulder_pitch_l/r (M11 fix) (see mountExcludedFromOwnAxis,
+  // Section 2), whose motor cylinders are drawn at their mount-FREE axis:
+  // those joints' own mount-angle values no longer reorient their own motor
+  // housing at all -- only the forearm (elbow) or the whole downstream arm
+  // (shoulder) is reoriented.
   for (const j of JOINTS) {
     const parentWorld = j.parent === null ? baseTransform : T[j.parent];
-    // M10 FIX: elbow_pitch_l/r's motor cylinder is drawn at its mount-FREE
-    // axis orientation (see mountAppliesToEndEffectorOnly/jointAxisWorld) --
-    // the mount-angle value now only ever reorients the forearm, never the
-    // motor housing itself.
-    const mountRotation = mountAppliesToEndEffectorOnly(j.name) ? mat4Identity() : mountRotationMatrix4(j);
+    // M10/M11 FIX: elbow_pitch_l/r's and shoulder_pitch_l/r's motor
+    // cylinders are drawn at their mount-FREE axis orientation (see
+    // mountExcludedFromOwnAxis/jointAxisWorld) -- their mount-angle values
+    // now only ever reorient what's downstream, never their own motor
+    // housing.
+    const mountRotation = mountExcludedFromOwnAxis(j.name) ? mat4Identity() : mountRotationMatrix4(j);
     const mountedAxisLocal = rotateOnly(mountRotation, j.axis);
     const axisRobot = rotateOnly(parentWorld, mountedAxisLocal);
     const axisThree = robotToThree(axisRobot).normalize();
@@ -3731,19 +3829,23 @@ function updateTorqueDisplay() {
  *                       anchor point already used by computeJointTorques
  *                       (waist_yaw, at the waist<->shoulder midpoint) --
  *                       deliberately NOT a new physics contribution (see
- *                       "constraints" below); ALSO owns each shoulder
- *                       joint's own mount_r{x,y,z}_deg (two separate
- *                       triplets, left/right -- distinct from
- *                       elbow_pitch_l/r's, which live under 前腕 below, NOT
- *                       上腕 -- see the MOUNT-ANGLE SPLITTING DECISION note)
+ *                       "constraints" below). Does NOT own each shoulder
+ *                       joint's own mount_r{x,y,z}_deg any more (M11 fix --
+ *                       moved to 上腕/upper-arm below; see the MOUNT-ANGLE
+ *                       SPLITTING DECISION note), since it no longer has
+ *                       any effect on the clavicle at all.
  *   首     neck         neck_pitch incoming link (origin_offset_mm)
  *   頭部支持 head_mount  neck_pitch end-effector link (end_effector_offset_mm)
  *   頭部   head         the head sphere: HEAD_RADIUS_MM (new) + the
  *                       EXISTING head payload_mass_g, relabeled here as
  *                       "頭部の重量" (not a new weight concept)
  *   上腕L/R upper_arm_l/r  elbow_pitch_l/r incoming link (origin_offset_mm);
- *                          NO mount-angle control (see below) -- an
- *                          addInfoRow note explains why instead
+ *                          NO mount-angle control for elbow_pitch_l/r itself
+ *                          (see below) -- an addInfoRow note explains why
+ *                          instead -- but DOES own each shoulder joint's own
+ *                          mount_r{x,y,z}_deg as of the M11 fix (moved from
+ *                          鎖骨/clavicle above -- see the MOUNT-ANGLE
+ *                          SPLITTING DECISION note)
  *   前腕L/R forearm_l/r    elbow_pitch_l/r end-effector link (end_effector_offset_mm) --
  *                          shape (length/thickness) only; its weight-override
  *                          slot is presented under 手/hand instead (see below);
@@ -3785,6 +3887,29 @@ function updateTorqueDisplay() {
  * for neck_pitch-style future cases, but elbow_pitch_l/r now register
  * exactly one, same as every other joint).
  *
+ * shoulder_pitch_l/r went through the SAME "mount lives with the incoming
+ * link" reasoning originally (their mount_r{x,y,z}_deg lived under
+ * 鎖骨/clavicle, the part governed by their own origin_offset_mm), but a
+ * user report ("肩の取付角度を変えると肩関節自体の位置が動いてしまう") plus
+ * re-reading jointTransform()/forwardKinematics() surfaced the SAME class
+ * of bug M10 fixed for the elbow: R_mount was baked into the shoulder's own
+ * effective_offset_local (= R_mount @ origin_offset_mm, the waist->shoulder
+ * vector), so editing a shoulder's mount angle moved WHERE THE SHOULDER
+ * PIVOT ITSELF SAT relative to the waist -- visibly shifting the clavicle
+ * (whose length is derived from the two shoulders' real FK positions,
+ * amplifying the bug into a visible clavicle-geometry glitch) instead of
+ * rotating the arm attached to it. Unlike the elbow, though, shoulder_pitch_l/r
+ * are NOT leaf joints -- they have a child (elbow_pitch_l/r) -- so the M11
+ * fix (mountAppliesToChildOnly, Section 2) takes a structurally different
+ * (and simpler) shape: rather than redirecting R_mount to an end-effector
+ * offset, it just stops removing R_mount from the ONE channel that already
+ * naturally propagates rotation downstream -- worldRotation(shoulder), which
+ * was already being computed and handed to the child joint. Consequence for
+ * this panel: 鎖骨/clavicle no longer has ANY mount-angle control (editing it
+ * would no longer change anything about the clavicle -- see its addInfoRow
+ * note above) and 上腕/upper-arm becomes the new home for it, since it's the
+ * part that visibly rotates around the now-fixed shoulder pivot.
+ *
  * CONSTRAINT: per the M6 brief, jointTransform/forwardKinematics/
  * jointAxisWorld/computeJointTorques internals are NOT touched by THIS
  * section -- only how their existing inputs (link_masses_g,
@@ -3792,9 +3917,10 @@ function updateTorqueDisplay() {
  * WithOverrides, Section 2B). This is why clavicle's "weight" reuses an
  * EXISTING link_masses_g anchor (the two shoulders' own entries) rather
  * than inventing a new one, and why hand's own mass is additive on top
- * of an existing entry rather than a new anchor point. (The M10 fix above
- * is a genuine change to those Section 2 internals, made separately from
- * -- and predating -- this section's own UI-only M6 constraint.)
+ * of an existing entry rather than a new anchor point. (The M10/M11 fixes
+ * above are genuine changes to those Section 2 internals, made separately
+ * from -- and predating, for M10 -- this section's own UI-only M6
+ * constraint.)
  * ===================================================================== */
 
 const skeletonPartsContainer = document.getElementById("skeleton-parts");
@@ -4084,13 +4210,21 @@ function updateWeightHints() {
 // aren't independent of that total. Thickness is a real, independent new
 // value. "Weight" is deliberately two fields (left/right), each reusing
 // that shoulder's own EXISTING link_masses_g entry -- see the section
-// header's CONSTRAINT note for why this isn't a new anchor point. Mount
-// angle is ALSO two fields (left/right): shoulder_pitch_l/r each have
-// their OWN mount_r{x,y,z}_deg (distinct from elbow_pitch_l/r's, which
-// live under 上腕/upper-arm below) -- since shoulder's own offset is
-// what this part's length/weight fields already govern, its mount angle
-// belongs here too, by the same "goes with whatever owns the incoming
-// link" rule used for every other part in this section.
+// header's CONSTRAINT note for why this isn't a new anchor point.
+//
+// Mount angle (M11 fix, reverting the pre-M11 design): NO editable control
+// here any more. shoulder_pitch_l/r's mount_r{x,y,z}_deg used to live here
+// because it was (incorrectly) believed to only affect this part's own
+// geometry -- but re-reading jointTransform()/forwardKinematics() (Section
+// 2) directly showed it was ALSO moving the shoulder pivot's own FK
+// position (visibly shifting the clavicle, since its length is derived
+// from the two shoulders' real FK positions), not just tilting the arm
+// attached to it. The M11 fix (mountAppliesToChildOnly, Section 2) makes
+// this joint's own position permanently mount-independent, so this
+// control's old location no longer makes sense: the mount angle now only
+// ever rotates the arm downstream of the shoulder (upper arm, elbow,
+// forearm, hand), so it moved to 上腕/upper-arm below, which is exactly
+// the part that visibly rotates when it changes.
 {
   const p = addPartDetails("clavicle", "鎖骨 (clavicle)");
   lengthInputs.shoulder_pitch_l = addLengthField(p, "shoulder_pitch_l", () => JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm, setLinkLength, "左肩オフセット長 (mm)");
@@ -4101,9 +4235,7 @@ function updateWeightHints() {
   clavicleThicknessInput = t.thickness;
   addWeightField(p, "shoulder_pitch_l", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.shoulder_pitch_l.origin_offset_mm), JOINTS_BY_NAME.shoulder_pitch_l.link_thickness_mm), "左肩取付部 重量 (g)");
   addWeightField(p, "shoulder_pitch_r", () => estimateLinkMassG(vecLen(JOINTS_BY_NAME.shoulder_pitch_r.origin_offset_mm), JOINTS_BY_NAME.shoulder_pitch_r.link_thickness_mm), "右肩取付部 重量 (g)");
-  p.addInfoRow("以下は肩関節(左/右)の取付角度です。肩関節の向きに影響します。");
-  addMountAngleField(p, JOINTS_BY_NAME.shoulder_pitch_l, "左肩 取付角度 (deg)");
-  addMountAngleField(p, JOINTS_BY_NAME.shoulder_pitch_r, "右肩 取付角度 (deg)");
+  p.addInfoRow("肩関節の取付角度は「上腕」パーツ側で編集できます。鎖骨の長さ・向きは常に左右の肩関節の実際の位置(FK)から算出されるため、取付角度の影響を受けません。");
 }
 
 // ---- 首 (neck): neck_pitch's incoming link ----
@@ -4147,21 +4279,31 @@ function updateWeightHints() {
 }
 
 // ---- 上腕 (upper arm) L/R: elbow_pitch_l/r's incoming link ----
-// NO mount-angle control here (M10 fix, reverting the M9 design): this
-// link's direction is now purely a function of shoulder_pitch_l/r's own
-// pose/mount and this joint's own length (dir0 * length) -- elbow_pitch_l/r's
-// mount_r{x,y,z}_deg no longer has ANY effect on the upper arm, only on the
-// forearm (see the section header's MOUNT-ANGLE SPLITTING DECISION / M10 FIX
-// note, and mountAppliesToEndEffectorOnly, Section 2). The sole editable
-// control for this value now lives under 前腕/forearm below.
-for (const [side, jointName, label] of [["l", "elbow_pitch_l", "上腕 (左, upper arm L)"], ["r", "elbow_pitch_r", "上腕 (右, upper arm R)"]]) {
+// elbow_pitch_l/r's OWN mount-angle control is NOT here (M10 fix, reverting
+// the M9 design): this link's direction is purely a function of
+// shoulder_pitch_l/r's own pose/mount and this joint's own length
+// (dir0 * length) -- elbow_pitch_l/r's mount_r{x,y,z}_deg has no effect on
+// the upper arm, only on the forearm (see the section header's MOUNT-ANGLE
+// SPLITTING DECISION / M10 FIX note, and mountAppliesToEndEffectorOnly,
+// Section 2). That control's sole editable location remains 前腕/forearm
+// below.
+//
+// shoulder_pitch_l/r's mount-angle control IS here (M11 fix, moved from
+// 鎖骨/clavicle above): since that fix makes the shoulder pivot's own
+// position permanently mount-independent, the mount angle now only ever
+// rotates everything downstream of the shoulder -- upper arm, elbow,
+// forearm, hand -- around that fixed pivot (mountAppliesToChildOnly,
+// Section 2). 上腕/upper-arm is the part that most directly, visibly
+// rotates when this value changes, so it's the correct home for it now.
+for (const [side, jointName, shoulderJointName, label] of [["l", "elbow_pitch_l", "shoulder_pitch_l", "上腕 (左, upper arm L)"], ["r", "elbow_pitch_r", "shoulder_pitch_r", "上腕 (右, upper arm R)"]]) {
   const p = addPartDetails("upper_arm_" + side, label);
   lengthInputs[jointName] = addLengthField(p, jointName, () => JOINTS_BY_NAME[jointName].origin_offset_mm, setLinkLength);
   const t = addThicknessField(p, jointName, JOINTS_BY_NAME[jointName].link_thickness_mm, setLinkThickness);
   thicknessInputs[jointName] = t.thickness;
   thicknessHintEls[jointName] = t.hint;
   addWeightField(p, jointName, () => estimateLinkMassG(vecLen(JOINTS_BY_NAME[jointName].origin_offset_mm), JOINTS_BY_NAME[jointName].link_thickness_mm));
-  p.addInfoRow("上腕の向きは肩関節の姿勢とこの長さのみで決まり、取付角度はありません（取付角度は「前腕」側でのみ編集できます）。");
+  p.addInfoRow("上腕自体の長さ・太さ・重量は肘関節側の値であり、肘関節自身の取付角度はここでは編集できません（肘の取付角度は「前腕」側で編集）。以下は肩関節の取付角度で、肩モーターの位置を中心に上腕から先(肘・前腕・手)全体を回転させます。");
+  addMountAngleField(p, JOINTS_BY_NAME[shoulderJointName], (side === "l" ? "左" : "右") + "肩 取付角度 (deg)");
 }
 
 // ---- 前腕 (forearm) L/R: elbow_pitch_l/r's end-effector link ----
